@@ -1,6 +1,18 @@
 // Reglas y formato de las visitas. Se usa tanto en pantalla como en el servidor.
-export const HORAS = ["16:00", "16:30", "17:00", "17:30", "18:00", "18:30"] as const;
-export const TEXTO_HORARIO = "Horarios disponibles de Lunes a Sábado de 4:00 PM a 6:30 PM";
+const TARDE = ["16:00", "16:30", "17:00", "17:30", "18:00", "18:30"];
+const MANANA_FIN_DE_SEMANA = ["11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00"];
+
+export const HORAS_ENTRE_SEMANA: readonly string[] = TARDE;
+export const HORAS_FIN_DE_SEMANA: readonly string[] = [...MANANA_FIN_DE_SEMANA, ...TARDE];
+export const TEXTO_HORARIO =
+  "Horarios disponibles: de lunes a viernes de 4:00 PM a 6:30 PM; sábados y domingos de 11:00 AM a 2:00 PM y de 4:00 PM a 6:30 PM";
+
+/** Horas disponibles para un día (AAAA-MM-DD). Sin día elegido, no hay horas. */
+export function horasDeFecha(fecha: string): readonly string[] {
+  if (!fecha) return [];
+  const dia = new Date(`${fecha}T12:00:00Z`).getUTCDay(); // 0 domingo, 6 sábado
+  return dia === 0 || dia === 6 ? HORAS_FIN_DE_SEMANA : HORAS_ENTRE_SEMANA;
+}
 
 // "16:30" -> "4:30 PM"
 export function etiquetaHora(h: string) {
@@ -23,10 +35,9 @@ export function validarVisita(fecha: unknown, hora: unknown): string | null {
   if (typeof fecha !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(Date.parse(fecha))) {
     return "Elige el día de la visita.";
   }
-  if (typeof hora !== "string" || !(HORAS as readonly string[]).includes(hora)) {
-    return "Elige una hora entre las 4:00 PM y las 6:30 PM.";
+  if (typeof hora !== "string" || !horasDeFecha(fecha).includes(hora)) {
+    return "Elige una hora dentro del horario disponible para ese día.";
   }
-  if (new Date(`${fecha}T00:00:00Z`).getUTCDay() === 0) return "Los domingos no hay visitas. Elige de lunes a sábado.";
   // Solo desde mañana, con la fecha de hoy en Ciudad de México.
   const hoy = new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
   if (fecha <= hoy) return "Elige una fecha a partir de mañana.";

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { DE_CUIDADO, DIDACTICAS } from "@/lib/actividades";
-import { HORAS, TEXTO_HORARIO, etiquetaHora, etiquetaVisita } from "@/lib/visitas";
+import { horasDeFecha, TEXTO_HORARIO, etiquetaHora, etiquetaVisita } from "@/lib/visitas";
 const input = "mt-1 w-full rounded-lg border-2 border-[#9DB8B5] bg-white px-4 py-3";
 const btn = "rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white disabled:opacity-50";
 const btnLineal = "rounded-xl border-2 border-[#2F6F6B] px-5 py-3 font-bold text-[#2F6F6B]";
@@ -54,12 +54,14 @@ export function VolunteerForm() {
   const { onSubmit, error, cargando } = useEnvio(
     "/api/voluntarios",
     (f) => {
-      if (elegidas.length === 0) throw new Error("Elige al menos una actividad.");
+      const otras = String(f.get("otras") ?? "").trim();
+      if (elegidas.length === 0 && otras.length < 3) throw new Error("Elige al menos una actividad o escribe otra.");
       return {
         email: f.get("email"), clave: f.get("clave"), contacto: f.get("contacto"),
+        tutor: menor ? { nombre: f.get("tutor_nombre"), edad: Number(f.get("tutor_edad")), correo: f.get("tutor_correo") } : undefined,
         voluntario: {
           nombre_completo: f.get("nombre"), edad, ocupacion: f.get("ocupacion"), intereses: f.get("intereses"),
-          experiencia_previa: f.get("experiencia") === "si", actividad_deseada: elegidas,
+          experiencia_previa: f.get("experiencia") === "si", actividad_deseada: elegidas, otras_actividades: otras,
           motivo: f.get("motivo"), descripcion: f.get("descripcion"),
         },
       };
@@ -81,10 +83,20 @@ export function VolunteerForm() {
         <input name="edad" type="number" min={12} max={110} required onChange={(e) => cambiarEdad(Number(e.target.value))} className={input} />
       </Campo>
       {menor && (
-        <div role="alert" className="rounded-xl border-2 border-[#E4A93C] bg-[#FBEFD3] p-4 font-bold">
-          Eres menor de edad. Para visitar a un adulto mayor debes ir acompañado/a de una persona adulta y contar con su
-          consentimiento. Además, solo podrás elegir actividades didácticas.
-        </div>
+        <>
+          <div role="alert" className="rounded-xl border-2 border-[#E4A93C] bg-[#FBEFD3] p-4 font-bold">
+            Eres menor de edad. Para visitar a un adulto mayor debes ir acompañado/a de una persona adulta y contar con su
+            consentimiento. Además, solo podrás elegir actividades didácticas.
+          </div>
+          <fieldset className="space-y-4 rounded-xl border-2 border-[#E4A93C] p-4">
+            <legend className="px-2 font-bold">Adulto responsable</legend>
+            <Campo label="Nombre completo del adulto responsable"><input name="tutor_nombre" required className={input} /></Campo>
+            <Campo label="Edad del adulto responsable"><input name="tutor_edad" type="number" min={18} max={110} required className={input} /></Campo>
+            <Campo label="Correo del adulto responsable" hint="También recibirá los avisos de tus visitas.">
+              <input name="tutor_correo" type="email" required className={input} />
+            </Campo>
+          </fieldset>
+        </>
       )}
       <Campo label="¿A qué te dedicas?"><input name="ocupacion" required className={input} /></Campo>
       <Campo label="Tus intereses" hint="Sepáralos con comas: música, lectura, arte">
@@ -116,11 +128,17 @@ export function VolunteerForm() {
             <input type="checkbox" className="size-5" disabled={menor} checked={elegidas.includes(a)} onChange={() => alternar(a)} /> {a}
           </label>
         ))}
+        <Campo label="Otras actividades:" hint={menor ? "Escribe actividades didácticas. La casa de apoyo revisará tu propuesta." : "Escribe lo que te gustaría hacer."}>
+          <textarea name="otras" rows={2} maxLength={300} className={input} />
+        </Campo>
       </fieldset>
       <p className="rounded-xl bg-[#E3EEEC] p-4">
         <span className="font-bold">{TEXTO_HORARIO}.</span> El día y la hora exactos los eliges al solicitar la visita a cada abuelito.
       </p>
-      <Campo label="Teléfono o WhatsApp de contacto" hint="Solo lo verá la organización.">
+      <Campo
+        label={menor ? "Teléfono del adulto responsable" : "Teléfono o WhatsApp de contacto"}
+        hint="Solo lo verá la organización."
+      >
         <input name="contacto" required className={input} />
       </Campo>
 
@@ -191,44 +209,45 @@ export function ResidentForm() {
 
    // Calendario y hora para agendar o reagendar una visita.
    function SelectorCita({ titulo, cargando, error, onEnviar, onVolver }: {
-     titulo: string; cargando: boolean; error: string;
-     onEnviar: (fecha: string, hora: string) => void; onVolver: () => void;
-   }) {
-     const [fecha, setFecha] = useState("");
-     const [hora, setHora] = useState("");
-     const [aviso, setAviso] = useState("");
-     const manana = fechaLocal(1);
+  titulo: string; cargando: boolean; error: string;
+  onEnviar: (fecha: string, hora: string) => void; onVolver: () => void;
+}) {
+  const [fecha, setFecha] = useState("");
+  const [hora, setHora] = useState("");
+  const [aviso, setAviso] = useState("");
+  const manana = fechaLocal(1);
+  const horas = horasDeFecha(fecha); // las horas cambian según el día: entre semana, o fin de semana
 
-     function cambiarFecha(v: string) {
-       // El calendario del navegador no puede bloquear domingos ni fechas pasadas al escribir, así que se valida aquí.
-       if (v && v < manana) { setAviso("Elige una fecha a partir de mañana."); setFecha(""); return; }
-       if (v && new Date(`${v}T12:00:00`).getDay() === 0) { setAviso("Los domingos no hay visitas. Elige de lunes a sábado."); setFecha(""); return; }
-       setAviso(""); setFecha(v);
-     }
+  function cambiarFecha(v: string) {
+    setHora("");
+    // El calendario del navegador no puede bloquear fechas pasadas al escribir, así que se valida aquí.
+    if (v && v < manana) { setAviso("Elige una fecha a partir de mañana."); setFecha(""); return; }
+    setAviso(""); setFecha(v);
+  }
 
-     return (
-       <div className="space-y-4 rounded-xl border-2 border-[#9DB8B5] bg-[#F5F8F7] p-4">
-         <p className="font-bold">{titulo}</p>
-         <p>{TEXTO_HORARIO}</p>
-         <Campo label="Día de la visita">
-           <input type="date" min={manana} value={fecha} onChange={(e) => cambiarFecha(e.target.value)} className={input} />
-         </Campo>
-         <Campo label="Hora de la visita">
-           <select value={hora} onChange={(e) => setHora(e.target.value)} className={input}>
-             <option value="">Elige una hora</option>
-             {HORAS.map((h) => <option key={h} value={h}>{etiquetaHora(h)}</option>)}
-           </select>
-         </Campo>
-         {(aviso || error) && <p role="alert" className="font-bold text-red-700">{aviso || error}</p>}
-         <div className="flex flex-wrap gap-3">
-           <button disabled={cargando || !fecha || !hora} className={btn} onClick={() => onEnviar(fecha, hora)}>
-             {cargando ? "Enviando…" : "Enviar"}
-           </button>
-           <button disabled={cargando} className={btnLineal} onClick={onVolver}>Volver</button>
-         </div>
-       </div>
-     );
-   }
+  return (
+    <div className="space-y-4 rounded-xl border-2 border-[#9DB8B5] bg-[#F5F8F7] p-4">
+      <p className="font-bold">{titulo}</p>
+      <p>{TEXTO_HORARIO}</p>
+      <Campo label="Día de la visita">
+        <input type="date" min={manana} value={fecha} onChange={(e) => cambiarFecha(e.target.value)} className={input} />
+      </Campo>
+      <Campo label="Hora de la visita">
+        <select value={hora} disabled={!fecha} onChange={(e) => setHora(e.target.value)} className={input}>
+          <option value="">{fecha ? "Elige una hora" : "Elige primero el día"}</option>
+          {horas.map((h) => <option key={h} value={h}>{etiquetaHora(h)}</option>)}
+        </select>
+      </Campo>
+      {(aviso || error) && <p role="alert" className="font-bold text-red-700">{aviso || error}</p>}
+      <div className="flex flex-wrap gap-3">
+        <button disabled={cargando || !fecha || !hora} className={btn} onClick={() => onEnviar(fecha, hora)}>
+          {cargando ? "Enviando…" : "Enviar"}
+        </button>
+        <button disabled={cargando} className={btnLineal} onClick={onVolver}>Volver</button>
+      </div>
+    </div>
+  );
+}
 
    export function SolicitudButton({ residenteId, estado, visita }: { residenteId: string; estado?: string; visita?: string }) {
      const [local, setLocal] = useState<{ estado: string; visita?: string }>();

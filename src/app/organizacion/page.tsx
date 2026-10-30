@@ -91,7 +91,7 @@ export default async function Organizacion() {
   const [{ data: solicitudes, error: errorSolicitudes }, { data: residentes }] = await Promise.all([
     // Solo las solicitudes de los abuelitos de ESTA organización
     db.from("solicitudes")
-      .select("id, estado, created_at, fecha_visita, hora_visita, reagendada, residentes!inner(apodo, edad, organizacion_id), voluntarios(*, cuentas(email), contactos_voluntarios(contacto))")
+      .select("id, estado, created_at, fecha_visita, hora_visita, reagendada, residentes!inner(apodo, edad, organizacion_id), voluntarios(*, cuentas(email), contactos_voluntarios(contacto, tutor_nombre, tutor_edad, tutor_correo) )")
       .eq("residentes.organizacion_id", org.id)
       .order("created_at", { ascending: false }),
     db.from("residentes").select("*").eq("organizacion_id", org.id).order("created_at", { ascending: false }),
@@ -136,12 +136,15 @@ export default async function Organizacion() {
                 <p>Ocupación: {v.ocupacion}. Intereses: {v.intereses.join(", ")}.</p>
                 <p>Experiencia previa: {v.experiencia_previa ? "sí" : "no"}.</p>
                 <p>Actividades que quiere hacer: {v.actividad_deseada}</p>
+                {v.otras_actividades && <p>Otras actividades: {v.otras_actividades}</p>}
                 <p>Motivo de las visitas: {v.motivo}</p>
                 <p>Sobre el voluntario: {v.descripcion}</p>
                 <p className="mt-1 font-bold">Visita propuesta: {etiquetaVisita(s.fecha_visita, s.hora_visita)}</p>
                 {s.reagendada && s.estado === "pendiente" && <p className="font-bold text-[#2F6F6B]">Cita reagendada: el voluntario propone una nueva fecha.</p>}
-                <p>Contacto: {v.contactos_voluntarios?.contacto}. Correo: {v.cuentas?.email}</p>
-                {cancelada && <p className="mt-2 font-bold text-red-700">El voluntario canceló esta solicitud.</p>}
+                {v.contactos_voluntarios?.tutor_nombre && (
+                <p className="font-bold">Adulto responsable: {v.contactos_voluntarios.tutor_nombre}, {v.contactos_voluntarios.tutor_edad} años. Correo: {v.contactos_voluntarios.tutor_correo}</p>
+                )}
+                <p>{v.edad < 18 ? "Teléfono del adulto responsable" : "Contacto"}: {v.contactos_voluntarios?.contacto}. Correo de la cuenta: {v.cuentas?.email}</p>
                 <form action={cambiarEstado} className="mt-3 flex flex-wrap items-center gap-3">
                   <input type="hidden" name="id" value={s.id} />
                   <span className={`rounded-full px-3 py-1 font-bold ${est.clase}`}>{est.texto}</span>
