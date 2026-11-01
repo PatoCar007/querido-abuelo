@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   if (previa) {
     // Reagendar: vuelve a pendiente y se reinician los avisos de recordatorio.
     const { error } = await db.from("solicitudes")
-      .update({ ...visita, estado: "pendiente", reagendada: true, recordatorio_enviado: false, aviso_dia_enviado: false, created_at: new Date().toISOString() })
+      .update({ ...visita, estado: "pendiente", reagendada: true, reagendada_por_org: false, recordatorio_enviado: false, aviso_dia_enviado: false, created_at: new Date().toISOString() })
       .eq("id", previa.id).eq("estado", "cancelada");
     if (error) return err(error.message, 500);
     solicitudId = previa.id;

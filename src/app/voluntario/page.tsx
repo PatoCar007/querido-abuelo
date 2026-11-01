@@ -18,7 +18,7 @@ export default async function DashboardVoluntario() {
     db.from("residentes")
       .select("*, organizaciones!inner(nombre, edad_minima, criterios, verificada)")
       .eq("organizaciones.verificada", true),
-    db.from("solicitudes").select("residente_id, estado, fecha_visita, hora_visita").eq("voluntario_id", v.id),
+    db.from("solicitudes").select("residente_id, estado, fecha_visita, hora_visita, reagendada_por_org").eq("voluntario_id", v.id),
   ]);
 
   const casas: Record<string, any> = Object.fromEntries((residentes ?? []).map((r: any) => [r.id, r.organizaciones]));
@@ -26,6 +26,7 @@ export default async function DashboardVoluntario() {
   const visitas: Record<string, string> = Object.fromEntries(
     (enviadas ?? []).map((s) => [s.residente_id, s.fecha_visita ? etiquetaVisita(s.fecha_visita, s.hora_visita) : ""])
   );
+  const porOrg: Record<string, boolean> = Object.fromEntries((enviadas ?? []).map((s) => [s.residente_id, !!s.reagendada_por_org]));
   const lista = recomendarResidentes(v, residentes ?? []);
   const historial = lista.filter((r) => estados[r.residente.id]); // con quienes ya hay solicitud
   const nuevos = lista.filter((r) => !estados[r.residente.id]);
@@ -54,7 +55,7 @@ export default async function DashboardVoluntario() {
               Esta casa de apoyo pide tener al menos {casa.edad_minima} años para visitar.
             </p>
           ) : (
-            <SolicitudButton residenteId={r.residente.id} estado={estado} visita={visitas[r.residente.id]} />
+            <SolicitudButton residenteId={r.residente.id} estado={estado} visita={visitas[r.residente.id]} porOrg={porOrg[r.residente.id]} />
           )}
         </div>
       </article>

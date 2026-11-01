@@ -6,10 +6,20 @@ import { db } from "@/lib/db";
 import { COOKIE_ORG } from "@/lib/orgAuth";
 import { exigirOrg } from "@/lib/orgSesion";
 import { etiquetaVisita } from "@/lib/visitas";
-import { avisarBajaResidente, avisarDecision, cargarContexto } from "@/lib/notifications";
-import { ResidentForm, BorrarResidenteButton, EliminarOrgButton } from "@/components/forms";
+import { avisarBajaResidente, avisarDecision, avisarPerfilEliminado, cargarContexto, type Ctx } from "@/lib/notifications";
+import { ResidentForm, BorrarResidenteButton, EliminarOrgButton, ReagendarOrgButton } from "@/components/forms";
 
 export const dynamic = "force-dynamic";
+
+// Solicitudes vigentes (pendientes o aprobadas) de esta organización, con los datos para avisar a cada voluntario.
+async function vigentes(orgId: string, residenteId?: string): Promise<Ctx[]> {
+  let q = db.from("solicitudes").select("id, residentes!inner(organizacion_id)")
+    .eq("residentes.organizacion_id", orgId).in("estado", ["pendiente", "aprobada"]);
+  if (residenteId) q = q.eq("residente_id", residenteId);
+  const { data } = await q;
+  const ctxs = await Promise.all((data ?? []).map((s: any) => cargarContexto(s.id)));
+  return ctxs.filter((c): c is Ctx => !!c);
+}
 
 // Cada acción verifica la sesión y que lo que se toca pertenezca a ESTA organización.
 async function cambiarEstado(fd: FormData) {
@@ -35,10 +45,14 @@ async function cambiarEstado(fd: FormData) {
 async function borrarResidente(fd: FormData) {
   "use server";
   const org = await exigirOrg();
+  const id = String(fd.get("id"));
+  const afectadas = await vigentes(org.id, id); // se leen ANTES de borrar
   // Sus solicitudes se borran solas (on delete cascade en la base de datos).
-  const { data: borrados } = await db.from("residentes").delete()
-    .eq("id", String(fd.get("id"))).eq("organizacion_id", org.id).select("apodo");
-  if (borrados?.length) await avisarBajaResidente(org, borrados[0].apodo);
+  const { data: borrados } = await db.from("residentes").delete().eq("id", id).eq("organizacion_id", org.id).select("apodo");
+  if (borrados?.length) {
+    await avisarBajaResidente(org, borrados[0].apodo);
+    await Promise.all(afectadas.map(avisarPerfilEliminado));
+  }
   revalidatePath("/organizacion");
   revalidatePath("/voluntario");
 }
@@ -51,6 +65,7 @@ async function guardarConfiguracion(fd: FormData) {
   await db.from("organizaciones").update({
     nombre: nombre.length >= 3 ? nombre : org.nombre,
     direccion: String(fd.get("direccion") ?? "").trim().slice(0, 250) || null,
+    telefono: String(fd.get("telefono") ?? "").trim().slice(0, 30) || null,
     edad_minima: Math.min(99, Math.max(12, Number(fd.get("edad_minima")) || 12)),
     criterios: String(fd.get("criterios") ?? "").trim().slice(0, 600) || null,
     correo_avisos: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) ? correo : null,
@@ -59,12 +74,14 @@ async function guardarConfiguracion(fd: FormData) {
   revalidatePath("/voluntario");
 }
 
-// Elimina la cuenta de la casa de apoyo con todo lo suyo (residentes y solicitudes). La cuenta original está protegida.
+// Elimina la cuenta de la casa de apoyo con todo lo suyo. La cuenta original está protegida.
 async function eliminarCuenta() {
   "use server";
   const org = await exigirOrg();
   if (org.principal) return;
+  const afectadas = await vigentes(org.id); // se leen ANTES de borrar
   await db.from("organizaciones").delete().eq("id", org.id).eq("principal", false);
+  await Promise.all(afectadas.map(avisarPerfilEliminado));
   (await cookies()).delete(COOKIE_ORG);
   revalidatePath("/voluntario");
   redirect("/organizacion/registro");
@@ -91,7 +108,7 @@ export default async function Organizacion() {
   const [{ data: solicitudes, error: errorSolicitudes }, { data: residentes }] = await Promise.all([
     // Solo las solicitudes de los abuelitos de ESTA organización
     db.from("solicitudes")
-      .select("id, estado, created_at, fecha_visita, hora_visita, reagendada, residentes!inner(apodo, edad, organizacion_id), voluntarios(*, cuentas(email), contactos_voluntarios(contacto, tutor_nombre, tutor_edad, tutor_correo) )")
+      .select("id, estado, created_at, fecha_visita, hora_visita, reagendada, reagendada_por_org, residentes!inner(apodo, edad, organizacion_id), voluntarios(*, cuentas(email), contactos_voluntarios(contacto, tutor_nombre, tutor_edad, tutor_correo))")
       .eq("residentes.organizacion_id", org.id)
       .order("created_at", { ascending: false }),
     db.from("residentes").select("*").eq("organizacion_id", org.id).order("created_at", { ascending: false }),
@@ -128,6 +145,7 @@ export default async function Organizacion() {
           {solicitudes?.map((s: any) => {
             const v = s.voluntarios;
             const cancelada = s.estado === "cancelada";
+            const puedeReagendar = s.estado === "pendiente" || s.estado === "aprobada";
             const est = ESTILO[s.estado] ?? ESTILO.pendiente;
             return (
               <article key={s.id} className={`rounded-2xl border bg-white p-6 ${cancelada ? "border-red-700" : "border-[#C9DAD7]"}`}>
@@ -140,11 +158,13 @@ export default async function Organizacion() {
                 <p>Motivo de las visitas: {v.motivo}</p>
                 <p>Sobre el voluntario: {v.descripcion}</p>
                 <p className="mt-1 font-bold">Visita propuesta: {etiquetaVisita(s.fecha_visita, s.hora_visita)}</p>
-                {s.reagendada && s.estado === "pendiente" && <p className="font-bold text-[#2F6F6B]">Cita reagendada: el voluntario propone una nueva fecha.</p>}
+                {s.reagendada_por_org && puedeReagendar && <p className="font-bold text-[#2F6F6B]">Reagendada por la casa de apoyo.</p>}
+                {s.reagendada && !s.reagendada_por_org && s.estado === "pendiente" && <p className="font-bold text-[#2F6F6B]">Cita reagendada: el voluntario propone una nueva fecha.</p>}
                 {v.contactos_voluntarios?.tutor_nombre && (
-                <p className="font-bold">Adulto responsable: {v.contactos_voluntarios.tutor_nombre}, {v.contactos_voluntarios.tutor_edad} años. Correo: {v.contactos_voluntarios.tutor_correo}</p>
+                  <p className="font-bold">Adulto responsable: {v.contactos_voluntarios.tutor_nombre}, {v.contactos_voluntarios.tutor_edad} años. Correo: {v.contactos_voluntarios.tutor_correo}</p>
                 )}
                 <p>{v.edad < 18 ? "Teléfono del adulto responsable" : "Contacto"}: {v.contactos_voluntarios?.contacto}. Correo de la cuenta: {v.cuentas?.email}</p>
+                {cancelada && <p className="mt-2 font-bold text-red-700">El voluntario canceló esta solicitud.</p>}
                 <form action={cambiarEstado} className="mt-3 flex flex-wrap items-center gap-3">
                   <input type="hidden" name="id" value={s.id} />
                   <span className={`rounded-full px-3 py-1 font-bold ${est.clase}`}>{est.texto}</span>
@@ -155,6 +175,7 @@ export default async function Organizacion() {
                     </>
                   )}
                 </form>
+                {puedeReagendar && <div className="mt-3"><ReagendarOrgButton solicitudId={s.id} /></div>}
               </article>
             );
           })}
@@ -191,27 +212,31 @@ export default async function Organizacion() {
           <label className="block"><span className="font-bold">Nombre de la casa de apoyo</span>
             <input name="nombre" defaultValue={org.nombre} required className={campo} /></label>
           <label className="block"><span className="font-bold">Dirección de la casa de apoyo</span>
-            <span className="block text-base text-[#4A5E5C]">Se envía al voluntario por correo cuando aceptas su solicitud.</span>
+            <span className="block text-base text-[#4A5E5C]">Se envía al voluntario por correo en cada aviso de su cita.</span>
             <input name="direccion" defaultValue={org.direccion ?? ""} placeholder="Calle, número, colonia, ciudad" className={campo} /></label>
+          <label className="block"><span className="font-bold">Teléfono de la casa de apoyo</span>
+            <span className="block text-base text-[#4A5E5C]">Se envía al voluntario para que pueda llamar si tiene dudas.</span>
+            <input name="telefono" defaultValue={org.telefono ?? ""} className={campo} /></label>
           <label className="block"><span className="font-bold">Edad mínima de los voluntarios</span>
             <span className="block text-base text-[#4A5E5C]">Quien tenga menos años no podrá solicitar visitas a tus residentes. Mínimo 12.</span>
             <input name="edad_minima" type="number" min={12} max={99} defaultValue={org.edad_minima} className={campo} /></label>
           <label className="block"><span className="font-bold">Tus criterios para aceptar voluntarios</span>
             <span className="block text-base text-[#4A5E5C]">Por ejemplo: disponibilidad mínima, cartas de recomendación, no se permiten visitas sin cita.</span>
             <textarea name="criterios" rows={3} maxLength={600} defaultValue={org.criterios ?? ""} className={campo} /></label>
-          <label className="block"><span className="font-bold">Correo para recibir avisos</span>
-            <span className="block text-base text-[#4A5E5C]">Si lo dejas vacío usamos el correo de tu cuenta (en la cuenta original, el de .env.local).</span>
+          <label className="block"><span className="font-bold">Correo para recibir avisos y para contacto de voluntarios</span>
+            <span className="block text-base text-[#4A5E5C]">Es el correo que recibe tus avisos y que los voluntarios ven para escribirte. Si lo dejas vacío usamos el correo de tu cuenta (en la cuenta original, el de ORG_EMAIL).</span>
             <input name="correo_avisos" type="email" defaultValue={org.correo_avisos ?? ""} className={campo} /></label>
           <button className="rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white">Guardar cambios</button>
         </form>
       </section>
+
       <section aria-labelledby="cuenta" className="border-t border-[#C9DAD7] pt-8">
         <h2 id="cuenta" className="mb-2 text-xl font-bold">Tu cuenta</h2>
         {org.principal ? (
           <p>Esta es la cuenta original de Querido Abuelo y está protegida: no se puede eliminar desde aquí.</p>
         ) : (
           <>
-            <p className="mb-4">Si eliminas la cuenta se borran tus residentes, tus solicitudes y todos tus datos, y podrás volver a registrar este correo.</p>
+            <p className="mb-4">Si eliminas la cuenta se borran tus residentes, tus solicitudes y todos tus datos, y podrás volver a registrar este correo. Los voluntarios con citas vigentes recibirán un aviso.</p>
             <form action={eliminarCuenta}><EliminarOrgButton /></form>
           </>
         )}

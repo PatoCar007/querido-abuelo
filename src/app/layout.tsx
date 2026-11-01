@@ -9,7 +9,15 @@ export const metadata = { title: "Querido Abuelo", description: "Voluntarios y a
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body className={`${font.className} bg-[#F5F8F7] text-lg leading-relaxed text-[#1E2B2A]`}>{children}</body>
+      <body className={`${font.className} flex min-h-screen flex-col bg-[#F5F8F7] text-lg leading-relaxed text-[#1E2B2A]`}>
+        <div className="flex-1">{children}</div>
+        <footer className="border-t border-[#C9DAD7] px-6 py-6 text-center text-base">
+          Para cualquier aclaración, enviar un correo a:{" "}
+          <a href="mailto:aclaracionesqueridoabuelo@gmail.com" className="font-bold text-[#2F6F6B] underline">
+            aclaracionesqueridoabuelo@gmail.com
+          </a>
+        </footer>
+      </body>
     </html>
   );
 }

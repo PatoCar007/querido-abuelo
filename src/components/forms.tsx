@@ -249,66 +249,73 @@ export function ResidentForm() {
   );
 }
 
-   export function SolicitudButton({ residenteId, estado, visita }: { residenteId: string; estado?: string; visita?: string }) {
-     const [local, setLocal] = useState<{ estado: string; visita?: string }>();
-     const [abierto, setAbierto] = useState(false);
-     const [error, setError] = useState("");
-     const [cargando, setCargando] = useState(false);
-     const actual = local?.estado ?? estado;
-     const cita = local ? local.visita : visita;
-     const mensaje = actual ? MENSAJES[actual] : undefined;
+   export function SolicitudButton({ residenteId, estado, visita, porOrg }: { residenteId: string; estado?: string; visita?: string; porOrg?: boolean }) {
+  const [local, setLocal] = useState<{ estado: string; visita?: string }>();
+  const [abierto, setAbierto] = useState(false);
+  const [error, setError] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const actual = local?.estado ?? estado;
+  const cita = local ? local.visita : visita;
+  const mensaje = actual ? MENSAJES[actual] : undefined;
+  // La casa de apoyo cambió la fecha: se avisa mientras el voluntario no haya hecho cambios propios.
+  const cambioOrg = !!porOrg && !local && (actual === "pendiente" || actual === "aprobada");
 
-     async function enviar(fecha: string, hora: string) {
-       setCargando(true); setError("");
-       try {
-         await post("/api/solicitudes", { residenteId, fecha, hora });
-         setLocal({ estado: "pendiente", visita: etiquetaVisita(fecha, hora) });
-         setAbierto(false);
-       } catch (e) { setError((e as Error).message); }
-       finally { setCargando(false); }
-     }
+  async function enviar(fecha: string, hora: string) {
+    setCargando(true); setError("");
+    try {
+      await post("/api/solicitudes", { residenteId, fecha, hora });
+      setLocal({ estado: "pendiente", visita: etiquetaVisita(fecha, hora) });
+      setAbierto(false);
+    } catch (e) { setError((e as Error).message); }
+    finally { setCargando(false); }
+  }
 
-     async function cancelar() {
-       setCargando(true); setError("");
-       try {
-         const r = await fetch("/api/solicitudes", {
-           method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ residenteId }),
-         });
-         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "No se pudo cancelar. Intenta de nuevo.");
-         setLocal({ estado: "cancelada", visita: cita });
-       } catch (e) { setError((e as Error).message); }
-       finally { setCargando(false); }
-     }
+  async function cancelar() {
+    setCargando(true); setError("");
+    try {
+      const r = await fetch("/api/solicitudes", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ residenteId }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "No se pudo cancelar. Intenta de nuevo.");
+      setLocal({ estado: "cancelada", visita: cita });
+    } catch (e) { setError((e as Error).message); }
+    finally { setCargando(false); }
+  }
 
-     if (abierto) {
-       return (
-         <SelectorCita
-           titulo={actual === "cancelada" ? "Elige la nueva fecha y hora de tu visita" : "¿Cuándo quieres visitar?"}
-           cargando={cargando} error={error} onEnviar={enviar}
-           onVolver={() => { setAbierto(false); setError(""); }}
-         />
-       );
-     }
+  if (abierto) {
+    return (
+      <SelectorCita
+        titulo={actual === "cancelada" ? "Elige la nueva fecha y hora de tu visita" : "¿Cuándo quieres visitar?"}
+        cargando={cargando} error={error} onEnviar={enviar}
+        onVolver={() => { setAbierto(false); setError(""); }}
+      />
+    );
+  }
 
-     if (mensaje) {
-       return (
-         <div className="space-y-3">
-           <p role="status" className={`rounded-xl px-4 py-3 font-bold ${mensaje.clase}`}>{mensaje.texto}</p>
-           {cita && actual !== "cancelada" && <p className="font-bold">Visita: {cita}</p>}
-           {(actual === "pendiente" || actual === "aprobada") && (
-             <button disabled={cargando} className="rounded-xl border-2 border-red-700 px-5 py-3 font-bold text-red-700 disabled:opacity-50"
-               onClick={() => confirm("¿Seguro que quieres cancelar? La organización recibirá el aviso.") && cancelar()}>
-               {cargando ? "Cancelando…" : "Cancelar cita"}
-             </button>
-           )}
-           {actual === "cancelada" && <button className={btn} onClick={() => setAbierto(true)}>Reagendar cita</button>}
-           {error && <p role="alert" className="text-red-700">{error}</p>}
-         </div>
-       );
-     }
+  if (mensaje) {
+    return (
+      <div className="space-y-3">
+        {cambioOrg && (
+          <p role="status" className="rounded-xl border-2 border-[#E4A93C] bg-[#FBEFD3] px-4 py-3 font-bold">
+            La casa de apoyo cambió la fecha de tu visita. Si no puedes asistir, puedes cancelar la cita.
+          </p>
+        )}
+        <p role="status" className={`rounded-xl px-4 py-3 font-bold ${mensaje.clase}`}>{mensaje.texto}</p>
+        {cita && actual !== "cancelada" && <p className="font-bold">Visita: {cita}</p>}
+        {(actual === "pendiente" || actual === "aprobada") && (
+          <button disabled={cargando} className="rounded-xl border-2 border-red-700 px-5 py-3 font-bold text-red-700 disabled:opacity-50"
+            onClick={() => confirm("¿Seguro que quieres cancelar? La organización recibirá el aviso.") && cancelar()}>
+            {cargando ? "Cancelando…" : "Cancelar cita"}
+          </button>
+        )}
+        {actual === "cancelada" && <button className={btn} onClick={() => setAbierto(true)}>Reagendar cita</button>}
+        {error && <p role="alert" className="text-red-700">{error}</p>}
+      </div>
+    );
+  }
 
-     return <button className={btn} onClick={() => setAbierto(true)}>Quiero conocerle</button>;
-   }
+  return <button className={btn} onClick={() => setAbierto(true)}>Quiero conocerle</button>;
+}
 
    export function EliminarCuentaButton() {
      const router = useRouter();
@@ -354,4 +361,31 @@ export function EliminarOrgButton() {
       }}
     >Eliminar cuenta de la casa de apoyo</button>
   );
+  
 } 
+// La casa de apoyo cambia la fecha de una visita vigente (se avisa al voluntario por correo).
+export function ReagendarOrgButton({ solicitudId }: { solicitudId: string }) {
+  const router = useRouter();
+  const [abierto, setAbierto] = useState(false);
+  const [error, setError] = useState("");
+  const [cargando, setCargando] = useState(false);
+
+  async function enviar(fecha: string, hora: string) {
+    setCargando(true); setError("");
+    try {
+      await post("/api/organizacion/reagendar", { solicitudId, fecha, hora });
+      setAbierto(false);
+      router.refresh();
+    } catch (e) { setError((e as Error).message); }
+    finally { setCargando(false); }
+  }
+
+  if (!abierto) return <button className={btnLineal} onClick={() => setAbierto(true)}>Reagendar visita</button>;
+  return (
+    <SelectorCita
+      titulo="Elige la nueva fecha y hora. El voluntario recibirá un correo con el cambio."
+      cargando={cargando} error={error} onEnviar={enviar}
+      onVolver={() => { setAbierto(false); setError(""); }}
+    />
+  );
+}

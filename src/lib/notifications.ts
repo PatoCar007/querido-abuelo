@@ -5,7 +5,7 @@ import { etiquetaHora, etiquetaVisita } from "./visitas";
 
 export type DestinoOrg = {
   id: string; nombre: string; usuario: string; principal: boolean;
-  correo_avisos: string | null; direccion?: string | null;
+  correo_avisos: string | null; direccion?: string | null; telefono?: string | null;
 };
 
 export type Tutor = { nombre: string; edad: number; correo: string };
@@ -74,19 +74,34 @@ async function enviar(dest: Destino, m: Mensaje) {
 }
 
 /* ---------- Destinatarios ---------- */
+// Correo de la casa: el que configuró; si no, el de su cuenta. La cuenta original usa ORG_EMAIL.
+const correoDe = (o: DestinoOrg) => o.correo_avisos ?? (o.principal ? process.env.ORG_EMAIL : o.usuario) ?? null;
+const aOrg = (o: DestinoOrg): Destino => ({ email: correoDe(o) });
 // El voluntario y, si es menor de edad, también su adulto responsable.
 const aVol = (c: Ctx): Destino => ({ email: [c.email, c.tutor?.correo] });
-// Cada casa recibe los avisos en el correo que configuró; si no, en el de su cuenta. La cuenta original usa ORG_EMAIL.
-const aOrg = (o: DestinoOrg): Destino => ({
-  email: o.correo_avisos ?? (o.principal ? process.env.ORG_EMAIL : o.usuario) ?? null,
-});
+
+// Agrega a todo correo del voluntario los datos de la casa de apoyo y el texto de aclaraciones.
+function conCasa(c: Ctx, m: Mensaje): Mensaje {
+  const o = c.org, tel = o.telefono?.trim(), mail = correoDe(o);
+  const datos: [string, string][] = [
+    ...(m.datos ?? []),
+    ["Casa de apoyo", o.nombre],
+    ["Dirección", o.direccion?.trim() || "La casa de apoyo te la compartirá pronto"],
+  ];
+  if (tel) datos.push(["Teléfono de la casa", tel]);
+  if (mail) datos.push(["Correo de la casa", mail]);
+  const medios = [tel && `llamar al ${tel}`, mail && `escribir un correo a ${mail}`].filter(Boolean).join(" o ");
+  const aclaracion = medios ? `Para cualquier aclaración, puedes ${medios}.` : "";
+  return { ...m, datos, cierre: [m.cierre, aclaracion].filter(Boolean).join(" ") || undefined };
+}
+const enviarVol = (c: Ctx, m: Mensaje) => enviar(aVol(c), conCasa(c, m));
 
 /* ---------- Carga de datos de una solicitud ---------- */
 const uno = (x: any) => (Array.isArray(x) ? x[0] : x);
 
 export async function cargarContexto(solicitudId: string): Promise<Ctx | null> {
   const { data } = await db.from("solicitudes")
-    .select("estado, reagendada, fecha_visita, hora_visita, voluntarios(*, cuentas(email), contactos_voluntarios(contacto, tutor_nombre, tutor_edad, tutor_correo)), residentes(apodo, edad, organizaciones(id, nombre, usuario, principal, direccion, correo_avisos))")
+    .select("estado, reagendada, fecha_visita, hora_visita, voluntarios(*, cuentas(email), contactos_voluntarios(contacto, tutor_nombre, tutor_edad, tutor_correo)), residentes(apodo, edad, organizaciones(id, nombre, usuario, principal, direccion, telefono, correo_avisos))")
     .eq("id", solicitudId).maybeSingle();
   const s: any = data;
   const v = uno(s?.voluntarios), r = uno(s?.residentes), org = uno(r?.organizaciones);
@@ -133,11 +148,11 @@ export async function avisarSolicitud(c: Ctx) {
       intro: `${v.nombre_completo} ${re ? "propone una nueva fecha para visitar a" : "quiere conocer a"} ${c.residente.apodo}. Revísala en tu panel para aprobarla o rechazarla.`,
       datos,
     }),
-    enviar(aVol(c), {
+    enviarVol(c, {
       asunto: re ? `Reagendaste tu cita con ${c.residente.apodo}` : `Agendaste una cita con ${c.residente.apodo}`,
       titulo: re ? "Reagendaste tu cita" : "¡Cita agendada!",
       intro: `Hola ${nombre(c)}, ${re ? "reagendaste" : "agendaste"} una cita con el residente ${c.residente.apodo} en la casa de apoyo ${c.org.nombre}, con fecha ${cuando(c)}. La casa revisará tu solicitud y te avisaremos en cuanto responda.`,
-      datos: [["Residente", c.residente.apodo], ["Casa de apoyo", c.org.nombre], ["Fecha y hora", cuando(c)]],
+      datos: [["Residente", c.residente.apodo], ["Fecha y hora", cuando(c)]],
       cierre: avisoMenor(c),
     }),
   ]);
@@ -147,18 +162,15 @@ export async function avisarSolicitud(c: Ctx) {
 export async function avisarDecision(c: Ctx, estado: "aprobada" | "rechazada") {
   if (estado === "aprobada") {
     const dir = c.org.direccion?.trim();
-    await enviar(aVol(c), {
+    await enviarVol(c, {
       asunto: `¡${c.org.nombre} aceptó tu solicitud!`,
       titulo: "¡Tu solicitud fue aceptada!",
       intro: `¡Hola ${nombre(c)}! La casa de apoyo ${c.org.nombre} aceptó tu solicitud. ¡Prepárate para visitar a ${c.residente.apodo}${dir ? ` en ${dir}` : ""}, el ${cuando(c)}!`,
-      datos: [
-        ["Residente", c.residente.apodo], ["Casa de apoyo", c.org.nombre],
-        ["Dirección", dir || "La casa de apoyo te la compartirá pronto"], ["Fecha y hora", cuando(c)],
-      ],
+      datos: [["Residente", c.residente.apodo], ["Fecha y hora", cuando(c)]],
       cierre: avisoMenor(c) ?? "Si algo se complica, puedes cancelar o reagendar desde tu panel de Querido Abuelo.",
     });
   } else {
-    await enviar(aVol(c), {
+    await enviarVol(c, {
       asunto: `Actualización de tu solicitud con ${c.residente.apodo}`,
       titulo: "Tu solicitud no pudo ser aceptada",
       intro: `Hola ${nombre(c)}, la casa de apoyo ${c.org.nombre} no pudo aceptar tu solicitud para visitar a ${c.residente.apodo} el ${cuando(c)}. Gracias por tu interés: puedes conocer a otros residentes desde tu panel de Querido Abuelo.`,
@@ -166,23 +178,46 @@ export async function avisarDecision(c: Ctx, estado: "aprobada" | "rechazada") {
   }
 }
 
+// La casa de apoyo cambió la fecha de la visita.
+export async function avisarReagendoOrg(c: Ctx, antes: { fecha?: string | null; hora?: string | null }) {
+  await enviarVol(c, {
+    asunto: `La casa de apoyo reagendó tu visita a ${c.residente.apodo}`,
+    titulo: "Tu visita tiene una nueva fecha",
+    intro: `Hola ${nombre(c)}, la casa de apoyo ${c.org.nombre} reagendó tu visita con ${c.residente.apodo}. La nueva fecha es ${cuando(c)}. Te pedimos una disculpa por el cambio.`,
+    datos: [
+      ["Nueva fecha y hora", cuando(c)], ["Fecha anterior", etiquetaVisita(antes.fecha, antes.hora)],
+      ["Residente", c.residente.apodo], ["Estado", c.estado === "aprobada" ? "Aprobada" : "Pendiente de aprobación"],
+    ],
+    cierre: ["Si no puedes asistir en esta fecha, cancela o reagenda desde tu panel de Querido Abuelo.", avisoMenor(c)].filter(Boolean).join(" "),
+  });
+}
+
 // El voluntario canceló: confirmación al voluntario.
 export async function avisarCancelacion(c: Ctx) {
-  await enviar(aVol(c), {
+  await enviarVol(c, {
     asunto: `Cancelaste tu cita con ${c.residente.apodo}`,
     titulo: "Cita cancelada",
     intro: `Hola ${nombre(c)}, cancelaste tu cita con el residente ${c.residente.apodo} en la casa de apoyo ${c.org.nombre}, que era el ${cuando(c)}. Cuando quieras, puedes reagendarla desde tu panel de Querido Abuelo.`,
   });
 }
 
+// La casa borró el perfil del residente (o su cuenta) y había una cita vigente.
+export async function avisarPerfilEliminado(c: Ctx) {
+  await enviarVol(c, {
+    asunto: `Tu cita con ${c.residente.apodo} fue cancelada`,
+    titulo: "Tu cita fue cancelada",
+    intro: `Hola ${nombre(c)}, la casa de apoyo ${c.org.nombre} eliminó el perfil de ${c.residente.apodo}, por lo que tu cita del ${cuando(c)} ya no se llevará a cabo. Lamentamos las molestias. Puedes conocer a otros residentes desde tu panel de Querido Abuelo.`,
+  });
+}
+
 /* ---------- Avisos: recordatorios diarios ---------- */
 // El día antes de una cita aceptada: recordatorio al voluntario.
 export async function avisarRecordatorio(c: Ctx) {
-  await enviar(aVol(c), {
+  await enviarVol(c, {
     asunto: `Mañana visitas a ${c.residente.apodo}`,
     titulo: "Mañana es tu visita",
     intro: `Hola ${nombre(c)}, te recordamos que mañana visitas a ${c.residente.apodo} en la casa de apoyo ${c.org.nombre}.`,
-    datos: [["Fecha y hora", cuando(c)], ["Dirección", c.org.direccion?.trim() || "Consúltala con la casa de apoyo"], ["Residente", c.residente.apodo]],
+    datos: [["Fecha y hora", cuando(c)], ["Residente", c.residente.apodo]],
     cierre: avisoMenor(c) ?? "Si no puedes asistir, cancela o reagenda desde tu panel para avisar a la casa de apoyo.",
   });
 }
