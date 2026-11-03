@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { orgActual } from "@/lib/orgSesion";
+import { horasDisponibles } from "@/lib/horarios";
 import { avisarReagendoOrg, cargarContexto } from "@/lib/notifications";
 import { validarVisita } from "@/lib/visitas";
 
@@ -13,6 +14,10 @@ export async function POST(req: Request) {
   const { solicitudId, fecha, hora } = await req.json();
   const problema = validarVisita(fecha, hora);
   if (problema || typeof solicitudId !== "string") return err(problema ?? "Solicitud no válida.", 400);
+  // Solo días y horas del horario de ESTA casa de apoyo
+  if (!horasDisponibles(fecha, org.horario).includes(hora)) {
+    return err("Elige un día y una hora dentro del horario de tu casa de apoyo.", 400);
+  }
 
   // Solo solicitudes de residentes de ESTA organización, todavía vigentes
   const { data: s } = await db.from("solicitudes")

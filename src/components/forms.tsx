@@ -1,8 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DE_CUIDADO, DIDACTICAS } from "@/lib/actividades";
-import { horasDeFecha, TEXTO_HORARIO, etiquetaHora, etiquetaVisita } from "@/lib/visitas";
+import { etiquetaHora, etiquetaVisita } from "@/lib/visitas";
+import {
+  NOMBRES_DIA, OPCIONES_HORA, USAR_DISPONIBILIDAD_VOLUNTARIO,
+  horarioDeFormData, horasDisponibles, resumenHorario, validarHorario, type Horario,
+} from "@/lib/horarios";
+
 const input = "mt-1 w-full rounded-lg border-2 border-[#9DB8B5] bg-white px-4 py-3";
 const btn = "rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white disabled:opacity-50";
 const btnLineal = "rounded-xl border-2 border-[#2F6F6B] px-5 py-3 font-bold text-[#2F6F6B]";
@@ -37,6 +42,62 @@ function useEnvio(url: string, armar: (f: FormData) => unknown, alExito: (form: 
   return { onSubmit, error, cargando };
 }
 
+/* ---------- Horarios: campos que usan voluntarios (sin días) y casas de apoyo (con días) ---------- */
+const OPCIONES = [
+  <option key="vacio" value="">—</option>,
+  ...OPCIONES_HORA.map((h) => <option key={h} value={h}>{etiquetaHora(h)}</option>),
+];
+
+export function HorarioCampos({ valor, conDias }: { valor?: Horario | null; conDias?: boolean }) {
+  const grupo = (pre: "semana" | "finde", titulo: string) => (
+    <fieldset className="space-y-3 rounded-xl border-2 border-[#C9DAD7] p-4">
+      <legend className="px-2 font-bold">{titulo}</legend>
+      {[0, 1].map((i) => (
+        <div key={i} className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="font-bold">{i === 0 ? "Desde" : "Segundo horario, desde"}</span>
+            <select name={`${pre}${i + 1}_desde`} defaultValue={valor?.[pre]?.[i]?.[0] ?? ""} className={input}>{OPCIONES}</select>
+          </label>
+          <label className="block">
+            <span className="font-bold">{i === 0 ? "Hasta" : "Segundo horario, hasta"}</span>
+            <select name={`${pre}${i + 1}_hasta`} defaultValue={valor?.[pre]?.[i]?.[1] ?? ""} className={input}>{OPCIONES}</select>
+          </label>
+        </div>
+      ))}
+    </fieldset>
+  );
+  return (
+    <div className="space-y-4">
+      {conDias && (
+        <fieldset className="flex flex-wrap gap-x-5 gap-y-2">
+          <legend className="mb-1 font-bold">Días en que recibes visitas</legend>
+          {[1, 2, 3, 4, 5, 6, 0].map((d) => (
+            <label key={d} className="flex items-center gap-2">
+              <input type="checkbox" name="dia" value={d} defaultChecked={valor?.dias?.includes(d)} className="size-5" /> {NOMBRES_DIA[d]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {grupo("semana", "Lunes a viernes")}
+      {grupo("finde", "Sábados y domingos")}
+      <p className="text-base text-[#4A5E5C]">
+        Cada horario indica las horas en que puede empezar una visita, cada 30 minutos. Por ejemplo, de 4:00 PM a 6:30 PM
+        permite empezar a las 4:00, 4:30… hasta las 6:30 PM. Si un grupo de días no aplica, déjalo en blanco.
+      </p>
+    </div>
+  );
+}
+
+// Texto verde que aparece al guardar y se quita solo a los 4 segundos.
+export function AvisoGuardado({ ruta }: { ruta: string }) {
+  const router = useRouter();
+  useEffect(() => {
+    const t = setTimeout(() => router.replace(ruta, { scroll: false }), 4000);
+    return () => clearTimeout(t);
+  }, [router, ruta]);
+  return <p role="status" className="font-bold text-[#2F6F6B]">Información Guardada!</p>;
+}
+
 export function VolunteerForm() {
   const router = useRouter();
   const [edad, setEdad] = useState(0);
@@ -56,13 +117,16 @@ export function VolunteerForm() {
     (f) => {
       const otras = String(f.get("otras") ?? "").trim();
       if (elegidas.length === 0 && otras.length < 3) throw new Error("Elige al menos una actividad o escribe otra.");
+      const horario = horarioDeFormData(f, false);
+      const problema = validarHorario(horario);
+      if (problema) throw new Error(problema);
       return {
         email: f.get("email"), clave: f.get("clave"), contacto: f.get("contacto"),
         tutor: menor ? { nombre: f.get("tutor_nombre"), edad: Number(f.get("tutor_edad")), correo: f.get("tutor_correo") } : undefined,
         voluntario: {
           nombre_completo: f.get("nombre"), edad, ocupacion: f.get("ocupacion"), intereses: f.get("intereses"),
           experiencia_previa: f.get("experiencia") === "si", actividad_deseada: elegidas, otras_actividades: otras,
-          motivo: f.get("motivo"), descripcion: f.get("descripcion"),
+          motivo: f.get("motivo"), descripcion: f.get("descripcion"), horario,
         },
       };
     },
@@ -132,9 +196,14 @@ export function VolunteerForm() {
           <textarea name="otras" rows={2} maxLength={300} className={input} />
         </Campo>
       </fieldset>
-      <p className="rounded-xl bg-[#E3EEEC] p-4">
-        <span className="font-bold">{TEXTO_HORARIO}.</span> El día y la hora exactos los eliges al solicitar la visita a cada abuelito.
+
+      <h2 className="pt-4 text-2xl font-bold">Tu disponibilidad</h2>
+      <p>
+        Indica en qué horarios podrías visitar. Al agendar, solo verás los horarios de cada casa de apoyo que coincidan con
+        tu disponibilidad. Llena al menos un grupo de días; el fin de semana es opcional.
       </p>
+      <HorarioCampos />
+
       <Campo
         label={menor ? "Teléfono del adulto responsable" : "Teléfono o WhatsApp de contacto"}
         hint="Solo lo verá la organización."
@@ -193,42 +262,51 @@ export function ResidentForm() {
   );
 }
 
-   const MENSAJES: Record<string, { texto: string; clase: string }> = {
-     pendiente: { texto: "Solicitud enviada. La organización la está revisando.", clase: "bg-[#FBEFD3] text-[#1E2B2A]" },
-     aprobada: { texto: "¡Solicitud aprobada! La organización te contactará para coordinar la visita.", clase: "bg-[#2F6F6B] text-white" },
-     rechazada: { texto: "Por ahora no fue posible esta conexión. Te invitamos a conocer a otros residentes.", clase: "bg-[#E3EEEC] text-[#1E2B2A]" },
-     cancelada: { texto: "Cancelaste esta cita. La organización ya fue avisada. Si quieres, puedes reagendarla.", clase: "bg-[#E3EEEC] text-[#1E2B2A]" },
-   };
+const MENSAJES: Record<string, { texto: string; clase: string }> = {
+  pendiente: { texto: "Solicitud enviada. La organización la está revisando.", clase: "bg-[#FBEFD3] text-[#1E2B2A]" },
+  aprobada: { texto: "¡Solicitud aprobada! La organización te contactará para coordinar la visita.", clase: "bg-[#2F6F6B] text-white" },
+  rechazada: { texto: "Por ahora no fue posible esta conexión. Te invitamos a conocer a otros residentes.", clase: "bg-[#E3EEEC] text-[#1E2B2A]" },
+  cancelada: { texto: "Cancelaste esta cita. La organización ya fue avisada. Si quieres, puedes reagendarla.", clase: "bg-[#E3EEEC] text-[#1E2B2A]" },
+};
 
-   // Fecha de hoy + n días, en formato AAAA-MM-DD (hora local del navegador).
-   function fechaLocal(sumarDias: number) {
-     const d = new Date();
-     d.setDate(d.getDate() + sumarDias);
-     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-   }
+// Fecha de hoy + n días, en formato AAAA-MM-DD (hora local del navegador).
+function fechaLocal(sumarDias: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + sumarDias);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
-   // Calendario y hora para agendar o reagendar una visita.
-   function SelectorCita({ titulo, cargando, error, onEnviar, onVolver }: {
+// Calendario y hora para agendar o reagendar. Solo ofrece las horas que permite la casa de apoyo
+// (y que coinciden con la disponibilidad del voluntario, cuando se indica).
+function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, horarioCasa, horarioVol }: {
   titulo: string; cargando: boolean; error: string;
   onEnviar: (fecha: string, hora: string) => void; onVolver: () => void;
+  horarioCasa?: Horario | null; horarioVol?: Horario | null;
 }) {
   const [fecha, setFecha] = useState("");
   const [hora, setHora] = useState("");
   const [aviso, setAviso] = useState("");
   const manana = fechaLocal(1);
-  const horas = horasDeFecha(fecha); // las horas cambian según el día: entre semana, o fin de semana
+  const horas = horasDisponibles(fecha, horarioCasa, horarioVol);
 
   function cambiarFecha(v: string) {
     setHora("");
-    // El calendario del navegador no puede bloquear fechas pasadas al escribir, así que se valida aquí.
+    // El calendario del navegador no puede bloquear días al escribir, así que se valida aquí.
     if (v && v < manana) { setAviso("Elige una fecha a partir de mañana."); setFecha(""); return; }
+    if (v && horasDisponibles(v, horarioCasa, horarioVol).length === 0) {
+      setAviso(horasDisponibles(v, horarioCasa).length === 0
+        ? "Esta casa de apoyo no recibe visitas ese día. Elige otro."
+        : "Ese día no coincide con tu disponibilidad. Elige otro.");
+      setFecha(""); return;
+    }
     setAviso(""); setFecha(v);
   }
 
   return (
     <div className="space-y-4 rounded-xl border-2 border-[#9DB8B5] bg-[#F5F8F7] p-4">
       <p className="font-bold">{titulo}</p>
-      <p>{TEXTO_HORARIO}</p>
+      <p>Horario de la casa de apoyo: {resumenHorario(horarioCasa)}</p>
+      {horarioVol && USAR_DISPONIBILIDAD_VOLUNTARIO && <p>Tu disponibilidad: {resumenHorario(horarioVol)}</p>}
       <Campo label="Día de la visita">
         <input type="date" min={manana} value={fecha} onChange={(e) => cambiarFecha(e.target.value)} className={input} />
       </Campo>
@@ -249,7 +327,10 @@ export function ResidentForm() {
   );
 }
 
-   export function SolicitudButton({ residenteId, estado, visita, porOrg }: { residenteId: string; estado?: string; visita?: string; porOrg?: boolean }) {
+export function SolicitudButton({ residenteId, estado, visita, porOrg, horarioCasa, horarioVol }: {
+  residenteId: string; estado?: string; visita?: string; porOrg?: boolean;
+  horarioCasa?: Horario | null; horarioVol?: Horario | null;
+}) {
   const [local, setLocal] = useState<{ estado: string; visita?: string }>();
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState("");
@@ -288,6 +369,7 @@ export function ResidentForm() {
         titulo={actual === "cancelada" ? "Elige la nueva fecha y hora de tu visita" : "¿Cuándo quieres visitar?"}
         cargando={cargando} error={error} onEnviar={enviar}
         onVolver={() => { setAbierto(false); setError(""); }}
+        horarioCasa={horarioCasa} horarioVol={horarioVol}
       />
     );
   }
@@ -317,41 +399,42 @@ export function ResidentForm() {
   return <button className={btn} onClick={() => setAbierto(true)}>Quiero conocerle</button>;
 }
 
-   export function EliminarCuentaButton() {
-     const router = useRouter();
-     const [error, setError] = useState("");
-     const [cargando, setCargando] = useState(false);
+export function EliminarCuentaButton() {
+  const router = useRouter();
+  const [error, setError] = useState("");
+  const [cargando, setCargando] = useState(false);
 
-     async function eliminar() {
-       if (!confirm("¿Eliminar tu cuenta? Se borrarán tus datos, tu historial y todas tus solicitudes. No se puede deshacer.")) return;
-       setCargando(true); setError("");
-       try {
-         const r = await fetch("/api/cuenta", { method: "DELETE" });
-         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "No se pudo eliminar la cuenta.");
-         router.push("/"); router.refresh();
-       } catch (e) { setError((e as Error).message); setCargando(false); }
-     }
+  async function eliminar() {
+    if (!confirm("¿Eliminar tu cuenta? Se borrarán tus datos, tu historial y todas tus solicitudes. No se puede deshacer.")) return;
+    setCargando(true); setError("");
+    try {
+      const r = await fetch("/api/cuenta", { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? "No se pudo eliminar la cuenta.");
+      router.push("/"); router.refresh();
+    } catch (e) { setError((e as Error).message); setCargando(false); }
+  }
 
-     return (
-       <div>
-         <button disabled={cargando} onClick={eliminar} className="rounded-xl border-2 border-red-700 px-5 py-3 font-bold text-red-700 disabled:opacity-50">
-           {cargando ? "Eliminando…" : "Eliminar cuenta"}
-         </button>
-         {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
-       </div>
-     );
-   }
+  return (
+    <div>
+      <button disabled={cargando} onClick={eliminar} className="rounded-xl border-2 border-red-700 px-5 py-3 font-bold text-red-700 disabled:opacity-50">
+        {cargando ? "Eliminando…" : "Eliminar cuenta"}
+      </button>
+      {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
+    </div>
+  );
+}
 
-   export function BorrarResidenteButton({ apodo }: { apodo: string }) {
-     return (
-       <button
-         className="rounded-lg border-2 border-red-700 px-4 py-2 font-bold text-red-700"
-         onClick={(e) => {
-           if (!confirm(`¿Borrar el perfil de ${apodo}? Se eliminarán todos sus datos y sus solicitudes. No se puede deshacer.`)) e.preventDefault();
-         }}
-       >Borrar perfil</button>
-     );
-   }
+export function BorrarResidenteButton({ apodo }: { apodo: string }) {
+  return (
+    <button
+      className="rounded-lg border-2 border-red-700 px-4 py-2 font-bold text-red-700"
+      onClick={(e) => {
+        if (!confirm(`¿Borrar el perfil de ${apodo}? Se eliminarán todos sus datos y sus solicitudes. No se puede deshacer.`)) e.preventDefault();
+      }}
+    >Borrar perfil</button>
+  );
+}
+
 export function EliminarOrgButton() {
   return (
     <button
@@ -361,10 +444,10 @@ export function EliminarOrgButton() {
       }}
     >Eliminar cuenta de la casa de apoyo</button>
   );
-  
-} 
+}
+
 // La casa de apoyo cambia la fecha de una visita vigente (se avisa al voluntario por correo).
-export function ReagendarOrgButton({ solicitudId }: { solicitudId: string }) {
+export function ReagendarOrgButton({ solicitudId, horarioCasa }: { solicitudId: string; horarioCasa?: Horario | null }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState("");
@@ -386,6 +469,7 @@ export function ReagendarOrgButton({ solicitudId }: { solicitudId: string }) {
       titulo="Elige la nueva fecha y hora. El voluntario recibirá un correo con el cambio."
       cargando={cargando} error={error} onEnviar={enviar}
       onVolver={() => { setAbierto(false); setError(""); }}
+      horarioCasa={horarioCasa}
     />
   );
 }

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { db } from "./db";
+import { resumenHorario } from "./horarios";
 import type { Voluntario } from "./schemas";
 import { etiquetaHora, etiquetaVisita } from "./visitas";
 
@@ -80,21 +81,29 @@ const aOrg = (o: DestinoOrg): Destino => ({ email: correoDe(o) });
 // El voluntario y, si es menor de edad, también su adulto responsable.
 const aVol = (c: Ctx): Destino => ({ email: [c.email, c.tutor?.correo] });
 
-// Agrega a todo correo del voluntario los datos de la casa de apoyo y el texto de aclaraciones.
-function conCasa(c: Ctx, m: Mensaje): Mensaje {
-  const o = c.org, tel = o.telefono?.trim(), mail = correoDe(o);
+// Enlace que abre Google Maps con la ruta hacia la dirección (no requiere clave de Google).
+const urlMapa = (dir: string) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dir)}`;
+
+// Agrega a todo correo del voluntario los datos de la casa y el texto de aclaraciones.
+// Con mapa = true y una dirección registrada, agrega también el botón «Cómo llegar».
+function conCasa(c: Ctx, m: Mensaje, mapa: boolean): Mensaje {
+  const o = c.org, tel = o.telefono?.trim(), mail = correoDe(o), dir = o.direccion?.trim();
   const datos: [string, string][] = [
     ...(m.datos ?? []),
     ["Casa de apoyo", o.nombre],
-    ["Dirección", o.direccion?.trim() || "La casa de apoyo te la compartirá pronto"],
+    ["Dirección", dir || "La casa de apoyo te la compartirá pronto"],
   ];
   if (tel) datos.push(["Teléfono de la casa", tel]);
   if (mail) datos.push(["Correo de la casa", mail]);
   const medios = [tel && `llamar al ${tel}`, mail && `escribir un correo a ${mail}`].filter(Boolean).join(" o ");
   const aclaracion = medios ? `Para cualquier aclaración, puedes ${medios}.` : "";
-  return { ...m, datos, cierre: [m.cierre, aclaracion].filter(Boolean).join(" ") || undefined };
+  return {
+    ...m, datos,
+    cierre: [m.cierre, aclaracion].filter(Boolean).join(" ") || undefined,
+    boton: m.boton ?? (mapa && dir ? { texto: "Cómo llegar (Google Maps)", url: urlMapa(dir) } : undefined),
+  };
 }
-const enviarVol = (c: Ctx, m: Mensaje) => enviar(aVol(c), conCasa(c, m));
+const enviarVol = (c: Ctx, m: Mensaje, mapa = false) => enviar(aVol(c), conCasa(c, m, mapa));
 
 /* ---------- Carga de datos de una solicitud ---------- */
 const uno = (x: any) => (Array.isArray(x) ? x[0] : x);
@@ -141,6 +150,7 @@ export async function avisarSolicitud(c: Ctx) {
     ["Motivo de las visitas", v.motivo], ["Sobre el voluntario", v.descripcion],
     [menor ? "Teléfono del adulto responsable" : "Contacto", c.contacto], ["Correo de la cuenta", c.email],
   );
+  if (v.horario) datos.push(["Disponibilidad del voluntario", resumenHorario(v.horario)]);
   await Promise.all([
     enviar(aOrg(c.org), {
       asunto: `${re ? "Cita reagendada" : "Nueva solicitud"}: ${v.nombre_completo} quiere conocer a ${c.residente.apodo}`,
@@ -154,7 +164,7 @@ export async function avisarSolicitud(c: Ctx) {
       intro: `Hola ${nombre(c)}, ${re ? "reagendaste" : "agendaste"} una cita con el residente ${c.residente.apodo} en la casa de apoyo ${c.org.nombre}, con fecha ${cuando(c)}. La casa revisará tu solicitud y te avisaremos en cuanto responda.`,
       datos: [["Residente", c.residente.apodo], ["Fecha y hora", cuando(c)]],
       cierre: avisoMenor(c),
-    }),
+    }, true),
   ]);
 }
 
@@ -168,7 +178,7 @@ export async function avisarDecision(c: Ctx, estado: "aprobada" | "rechazada") {
       intro: `¡Hola ${nombre(c)}! La casa de apoyo ${c.org.nombre} aceptó tu solicitud. ¡Prepárate para visitar a ${c.residente.apodo}${dir ? ` en ${dir}` : ""}, el ${cuando(c)}!`,
       datos: [["Residente", c.residente.apodo], ["Fecha y hora", cuando(c)]],
       cierre: avisoMenor(c) ?? "Si algo se complica, puedes cancelar o reagendar desde tu panel de Querido Abuelo.",
-    });
+    }, true);
   } else {
     await enviarVol(c, {
       asunto: `Actualización de tu solicitud con ${c.residente.apodo}`,
@@ -189,7 +199,7 @@ export async function avisarReagendoOrg(c: Ctx, antes: { fecha?: string | null; 
       ["Residente", c.residente.apodo], ["Estado", c.estado === "aprobada" ? "Aprobada" : "Pendiente de aprobación"],
     ],
     cierre: ["Si no puedes asistir en esta fecha, cancela o reagenda desde tu panel de Querido Abuelo.", avisoMenor(c)].filter(Boolean).join(" "),
-  });
+  }, true);
 }
 
 // El voluntario canceló: confirmación al voluntario.
@@ -219,7 +229,7 @@ export async function avisarRecordatorio(c: Ctx) {
     intro: `Hola ${nombre(c)}, te recordamos que mañana visitas a ${c.residente.apodo} en la casa de apoyo ${c.org.nombre}.`,
     datos: [["Fecha y hora", cuando(c)], ["Residente", c.residente.apodo]],
     cierre: avisoMenor(c) ?? "Si no puedes asistir, cancela o reagenda desde tu panel para avisar a la casa de apoyo.",
-  });
+  }, true);
 }
 
 // El mismo día: un solo correo a la casa con todas sus visitas de hoy.

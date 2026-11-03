@@ -3,11 +3,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { HORARIO_POR_DEFECTO, horarioDeFormData, resumenHorario, validarHorario, type Horario } from "@/lib/horarios";
 import { COOKIE_ORG } from "@/lib/orgAuth";
 import { exigirOrg } from "@/lib/orgSesion";
 import { etiquetaVisita } from "@/lib/visitas";
 import { avisarBajaResidente, avisarDecision, avisarPerfilEliminado, cargarContexto, type Ctx } from "@/lib/notifications";
-import { ResidentForm, BorrarResidenteButton, EliminarOrgButton, ReagendarOrgButton } from "@/components/forms";
+import {
+  ResidentForm, BorrarResidenteButton, EliminarOrgButton, ReagendarOrgButton, HorarioCampos, AvisoGuardado,
+} from "@/components/forms";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,14 @@ async function vigentes(orgId: string, residenteId?: string): Promise<Ctx[]> {
   const { data } = await q;
   const ctxs = await Promise.all((data ?? []).map((s: any) => cargarContexto(s.id)));
   return ctxs.filter((c): c is Ctx => !!c);
+}
+
+// Lee y valida los días y horarios del formulario; null si algo está mal.
+function leerHorario(fd: FormData): Horario | null {
+  try {
+    const h = horarioDeFormData(fd, true);
+    return validarHorario(h) ? null : h;
+  } catch { return null; }
 }
 
 // Cada acción verifica la sesión y que lo que se toca pertenezca a ESTA organización.
@@ -60,6 +71,8 @@ async function borrarResidente(fd: FormData) {
 async function guardarConfiguracion(fd: FormData) {
   "use server";
   const org = await exigirOrg();
+  const horario = leerHorario(fd);
+  if (!horario) redirect("/organizacion?error=horario#cfg");
   const nombre = String(fd.get("nombre") ?? "").trim();
   const correo = String(fd.get("correo_avisos") ?? "").trim().toLowerCase();
   await db.from("organizaciones").update({
@@ -69,9 +82,11 @@ async function guardarConfiguracion(fd: FormData) {
     edad_minima: Math.min(99, Math.max(12, Number(fd.get("edad_minima")) || 12)),
     criterios: String(fd.get("criterios") ?? "").trim().slice(0, 600) || null,
     correo_avisos: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) ? correo : null,
+    horario,
   }).eq("id", org.id);
   revalidatePath("/organizacion");
   revalidatePath("/voluntario");
+  redirect("/organizacion?guardado=1#cfg");
 }
 
 // Elimina la cuenta de la casa de apoyo con todo lo suyo. La cuenta original está protegida.
@@ -102,8 +117,9 @@ const ESTILO: Record<string, { texto: string; clase: string }> = {
 
 const campo = "mt-1 w-full rounded-lg border-2 border-[#9DB8B5] bg-white px-4 py-3";
 
-export default async function Organizacion() {
+export default async function Organizacion({ searchParams }: { searchParams: Promise<{ guardado?: string; error?: string }> }) {
   const org = await exigirOrg();
+  const { guardado, error: fallo } = await searchParams;
 
   const [{ data: solicitudes, error: errorSolicitudes }, { data: residentes }] = await Promise.all([
     // Solo las solicitudes de los abuelitos de ESTA organización
@@ -157,6 +173,7 @@ export default async function Organizacion() {
                 {v.otras_actividades && <p>Otras actividades: {v.otras_actividades}</p>}
                 <p>Motivo de las visitas: {v.motivo}</p>
                 <p>Sobre el voluntario: {v.descripcion}</p>
+                {v.horario && <p>Disponibilidad del voluntario: {resumenHorario(v.horario)}</p>}
                 <p className="mt-1 font-bold">Visita propuesta: {etiquetaVisita(s.fecha_visita, s.hora_visita)}</p>
                 {s.reagendada_por_org && puedeReagendar && <p className="font-bold text-[#2F6F6B]">Reagendada por la casa de apoyo.</p>}
                 {s.reagendada && !s.reagendada_por_org && s.estado === "pendiente" && <p className="font-bold text-[#2F6F6B]">Cita reagendada: el voluntario propone una nueva fecha.</p>}
@@ -175,7 +192,9 @@ export default async function Organizacion() {
                     </>
                   )}
                 </form>
-                {puedeReagendar && <div className="mt-3"><ReagendarOrgButton solicitudId={s.id} /></div>}
+                {puedeReagendar && (
+                  <div className="mt-3"><ReagendarOrgButton solicitudId={s.id} horarioCasa={org.horario ?? HORARIO_POR_DEFECTO} /></div>
+                )}
               </article>
             );
           })}
@@ -205,14 +224,14 @@ export default async function Organizacion() {
         <ResidentForm />
       </section>
 
-      <section aria-labelledby="cfg" className="border-t border-[#C9DAD7] pt-10">
-        <h2 id="cfg" className="text-2xl font-bold">Tu casa de apoyo y tus criterios</h2>
-        <p>Los voluntarios ven tus requisitos en la tarjeta de cada uno de tus residentes.</p>
+      <section id="cfg" aria-labelledby="cfgt" className="border-t border-[#C9DAD7] pt-10">
+        <h2 id="cfgt" className="text-2xl font-bold">Tu casa de apoyo y tus criterios</h2>
+        <p>Los voluntarios ven tus datos de contacto, tu horario y tus requisitos en la tarjeta de cada uno de tus residentes.</p>
         <form action={guardarConfiguracion} className="mt-4 max-w-xl space-y-4">
           <label className="block"><span className="font-bold">Nombre de la casa de apoyo</span>
             <input name="nombre" defaultValue={org.nombre} required className={campo} /></label>
           <label className="block"><span className="font-bold">Dirección de la casa de apoyo</span>
-            <span className="block text-base text-[#4A5E5C]">Se envía al voluntario por correo en cada aviso de su cita.</span>
+            <span className="block text-base text-[#4A5E5C]">Se envía al voluntario por correo, con un botón para abrir Google Maps.</span>
             <input name="direccion" defaultValue={org.direccion ?? ""} placeholder="Calle, número, colonia, ciudad" className={campo} /></label>
           <label className="block"><span className="font-bold">Teléfono de la casa de apoyo</span>
             <span className="block text-base text-[#4A5E5C]">Se envía al voluntario para que pueda llamar si tiene dudas.</span>
@@ -226,7 +245,22 @@ export default async function Organizacion() {
           <label className="block"><span className="font-bold">Correo para recibir avisos y para contacto de voluntarios</span>
             <span className="block text-base text-[#4A5E5C]">Es el correo que recibe tus avisos y que los voluntarios ven para escribirte. Si lo dejas vacío usamos el correo de tu cuenta (en la cuenta original, el de ORG_EMAIL).</span>
             <input name="correo_avisos" type="email" defaultValue={org.correo_avisos ?? ""} className={campo} /></label>
-          <button className="rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white">Guardar cambios</button>
+
+          <div className="space-y-3 pt-2">
+            <h3 className="text-xl font-bold">Días y horarios de visita</h3>
+            <p className="text-base text-[#4A5E5C]">Los voluntarios solo podrán agendar en los días y horas que indiques aquí. Cada casa de apoyo define los suyos.</p>
+            <HorarioCampos conDias valor={org.horario ?? HORARIO_POR_DEFECTO} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4">
+            <button className="rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white">Guardar cambios</button>
+            {guardado && <AvisoGuardado ruta="/organizacion" />}
+          </div>
+          {fallo === "horario" && (
+            <p role="alert" className="font-bold text-red-700">
+              Revisa los horarios: cada uno necesita hora de inicio y final (el inicio no puede ser después del final) y debe quedar al menos un día con horario.
+            </p>
+          )}
         </form>
       </section>
 
