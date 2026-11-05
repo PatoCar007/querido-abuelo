@@ -14,9 +14,9 @@ export async function POST(req: Request) {
   const { solicitudId, fecha, hora } = await req.json();
   const problema = validarVisita(fecha, hora);
   if (problema || typeof solicitudId !== "string") return err(problema ?? "Solicitud no válida.", 400);
-  // Solo días y horas del horario de ESTA casa de apoyo
-  if (!horasDisponibles(fecha, org.horario).includes(hora)) {
-    return err("Elige un día y una hora dentro del horario de tu casa de apoyo.", 400);
+  // Solo horas que ESTA casa de apoyo recibe visitas
+  if (!horasDisponibles(org.horas_bloqueadas).includes(hora)) {
+    return err("Elige una hora dentro del horario de visitas de tu casa de apoyo.", 400);
   }
 
   // Solo solicitudes de residentes de ESTA organización, todavía vigentes

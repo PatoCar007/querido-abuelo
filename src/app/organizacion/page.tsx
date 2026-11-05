@@ -3,13 +3,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { HORARIO_POR_DEFECTO, horarioDeFormData, resumenHorario, validarHorario, type Horario } from "@/lib/horarios";
+import { bloqueosDeFormData, resumenHorario, validarBloqueos, type Bloqueo } from "@/lib/horarios";
 import { COOKIE_ORG } from "@/lib/orgAuth";
 import { exigirOrg } from "@/lib/orgSesion";
 import { etiquetaVisita } from "@/lib/visitas";
 import { avisarBajaResidente, avisarDecision, avisarPerfilEliminado, cargarContexto, type Ctx } from "@/lib/notifications";
 import {
-  ResidentForm, BorrarResidenteButton, EliminarOrgButton, ReagendarOrgButton, HorarioCampos, AvisoGuardado,
+  ResidentForm, BorrarResidenteButton, EliminarOrgButton, ReagendarOrgButton, BloqueosCampos, AvisoGuardado,
 } from "@/components/forms";
 
 export const dynamic = "force-dynamic";
@@ -24,11 +24,11 @@ async function vigentes(orgId: string, residenteId?: string): Promise<Ctx[]> {
   return ctxs.filter((c): c is Ctx => !!c);
 }
 
-// Lee y valida los días y horarios del formulario; null si algo está mal.
-function leerHorario(fd: FormData): Horario | null {
+// Lee y valida los periodos «no recibimos visitas» del formulario; null si algo está mal.
+function leerBloqueos(fd: FormData): Bloqueo[] | null {
   try {
-    const h = horarioDeFormData(fd, true);
-    return validarHorario(h) ? null : h;
+    const b = bloqueosDeFormData(fd);
+    return validarBloqueos(b) ? null : b;
   } catch { return null; }
 }
 
@@ -71,8 +71,8 @@ async function borrarResidente(fd: FormData) {
 async function guardarConfiguracion(fd: FormData) {
   "use server";
   const org = await exigirOrg();
-  const horario = leerHorario(fd);
-  if (!horario) redirect("/organizacion?error=horario#cfg");
+  const bloqueos = leerBloqueos(fd);
+  if (!bloqueos) redirect("/organizacion?error=horario#cfg");
   const nombre = String(fd.get("nombre") ?? "").trim();
   const correo = String(fd.get("correo_avisos") ?? "").trim().toLowerCase();
   await db.from("organizaciones").update({
@@ -82,7 +82,7 @@ async function guardarConfiguracion(fd: FormData) {
     edad_minima: Math.min(99, Math.max(12, Number(fd.get("edad_minima")) || 12)),
     criterios: String(fd.get("criterios") ?? "").trim().slice(0, 600) || null,
     correo_avisos: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) ? correo : null,
-    horario,
+    horas_bloqueadas: bloqueos,
   }).eq("id", org.id);
   revalidatePath("/organizacion");
   revalidatePath("/voluntario");
@@ -173,7 +173,6 @@ export default async function Organizacion({ searchParams }: { searchParams: Pro
                 {v.otras_actividades && <p>Otras actividades: {v.otras_actividades}</p>}
                 <p>Motivo de las visitas: {v.motivo}</p>
                 <p>Sobre el voluntario: {v.descripcion}</p>
-                {v.horario && <p>Disponibilidad del voluntario: {resumenHorario(v.horario)}</p>}
                 <p className="mt-1 font-bold">Visita propuesta: {etiquetaVisita(s.fecha_visita, s.hora_visita)}</p>
                 {s.reagendada_por_org && puedeReagendar && <p className="font-bold text-[#2F6F6B]">Reagendada por la casa de apoyo.</p>}
                 {s.reagendada && !s.reagendada_por_org && s.estado === "pendiente" && <p className="font-bold text-[#2F6F6B]">Cita reagendada: el voluntario propone una nueva fecha.</p>}
@@ -193,7 +192,7 @@ export default async function Organizacion({ searchParams }: { searchParams: Pro
                   )}
                 </form>
                 {puedeReagendar && (
-                  <div className="mt-3"><ReagendarOrgButton solicitudId={s.id} horarioCasa={org.horario ?? HORARIO_POR_DEFECTO} /></div>
+                  <div className="mt-3"><ReagendarOrgButton solicitudId={s.id} bloqueadas={org.horas_bloqueadas} /></div>
                 )}
               </article>
             );
@@ -240,16 +239,16 @@ export default async function Organizacion({ searchParams }: { searchParams: Pro
             <span className="block text-base text-[#4A5E5C]">Quien tenga menos años no podrá solicitar visitas a tus residentes. Mínimo 12.</span>
             <input name="edad_minima" type="number" min={12} max={99} defaultValue={org.edad_minima} className={campo} /></label>
           <label className="block"><span className="font-bold">Tus criterios para aceptar voluntarios</span>
-            <span className="block text-base text-[#4A5E5C]">Por ejemplo: disponibilidad mínima, cartas de recomendación, no se permiten visitas sin cita.</span>
+            <span className="block text-base text-[#4A5E5C]">Por ejemplo: cartas de recomendación, no se permiten visitas sin cita.</span>
             <textarea name="criterios" rows={3} maxLength={600} defaultValue={org.criterios ?? ""} className={campo} /></label>
           <label className="block"><span className="font-bold">Correo para recibir avisos y para contacto de voluntarios</span>
             <span className="block text-base text-[#4A5E5C]">Es el correo que recibe tus avisos y que los voluntarios ven para escribirte. Si lo dejas vacío usamos el correo de tu cuenta (en la cuenta original, el de ORG_EMAIL).</span>
             <input name="correo_avisos" type="email" defaultValue={org.correo_avisos ?? ""} className={campo} /></label>
 
           <div className="space-y-3 pt-2">
-            <h3 className="text-xl font-bold">Días y horarios de visita</h3>
-            <p className="text-base text-[#4A5E5C]">Los voluntarios solo podrán agendar en los días y horas que indiques aquí. Cada casa de apoyo define los suyos.</p>
-            <HorarioCampos conDias valor={org.horario ?? HORARIO_POR_DEFECTO} />
+            {/* key: obliga a mostrar siempre lo que está guardado en la base de datos */}
+            <BloqueosCampos key={JSON.stringify(org.horas_bloqueadas ?? [])} valor={org.horas_bloqueadas} />
+            <p className="font-bold">Horario guardado actualmente (así lo ven los voluntarios): {resumenHorario(org.horas_bloqueadas)}.</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
@@ -258,7 +257,7 @@ export default async function Organizacion({ searchParams }: { searchParams: Pro
           </div>
           {fallo === "horario" && (
             <p role="alert" className="font-bold text-red-700">
-              Revisa los horarios: cada uno necesita hora de inicio y final (el inicio no puede ser después del final) y debe quedar al menos un día con horario.
+              Revisa los periodos: en cada uno elige «desde» y «hasta» (desde debe ser antes que hasta) y deja al menos una hora disponible para recibir visitas.
             </p>
           )}
         </form>

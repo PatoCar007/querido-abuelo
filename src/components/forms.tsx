@@ -3,10 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DE_CUIDADO, DIDACTICAS } from "@/lib/actividades";
 import { etiquetaHora, etiquetaVisita } from "@/lib/visitas";
-import {
-  NOMBRES_DIA, OPCIONES_HORA, USAR_DISPONIBILIDAD_VOLUNTARIO,
-  horarioDeFormData, horasDisponibles, resumenHorario, validarHorario, type Horario,
-} from "@/lib/horarios";
+import { MAX_BLOQUEOS, OPCIONES_BLOQUEO, TEXTO_HORARIO, horasDisponibles, resumenHorario, type Bloqueo } from "@/lib/horarios";
 
 const input = "mt-1 w-full rounded-lg border-2 border-[#9DB8B5] bg-white px-4 py-3";
 const btn = "rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white disabled:opacity-50";
@@ -42,49 +39,28 @@ function useEnvio(url: string, armar: (f: FormData) => unknown, alExito: (form: 
   return { onSubmit, error, cargando };
 }
 
-/* ---------- Horarios: campos que usan voluntarios (sin días) y casas de apoyo (con días) ---------- */
-const OPCIONES = [
-  <option key="vacio" value="">—</option>,
-  ...OPCIONES_HORA.map((h) => <option key={h} value={h}>{etiquetaHora(h)}</option>),
-];
-
-export function HorarioCampos({ valor, conDias }: { valor?: Horario | null; conDias?: boolean }) {
-  const grupo = (pre: "semana" | "finde", titulo: string) => (
+/* ---------- Casas de apoyo: horarios en que NO reciben visitas ---------- */
+export function BloqueosCampos({ valor }: { valor?: Bloqueo[] | null }) {
+  const opciones = [
+    <option key="vacio" value="">—</option>,
+    ...OPCIONES_BLOQUEO.map((h) => <option key={h} value={h}>{etiquetaHora(h)}</option>),
+  ];
+  return (
     <fieldset className="space-y-3 rounded-xl border-2 border-[#C9DAD7] p-4">
-      <legend className="px-2 font-bold">{titulo}</legend>
-      {[0, 1].map((i) => (
+      <legend className="px-2 font-bold">Seleccione los horarios en donde su organización no está disponible para recibir visitas</legend>
+      <p className="text-base text-[#4A5E5C]">
+        {TEXTO_HORARIO}. Los voluntarios verán todas las horas menos los periodos que indiques aquí, por ejemplo la hora de la
+        comida o del descanso. Si recibes visitas todo el día, deja los menús en blanco.
+      </p>
+      {Array.from({ length: MAX_BLOQUEOS }, (_, i) => (
         <div key={i} className="grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="font-bold">{i === 0 ? "Desde" : "Segundo horario, desde"}</span>
-            <select name={`${pre}${i + 1}_desde`} defaultValue={valor?.[pre]?.[i]?.[0] ?? ""} className={input}>{OPCIONES}</select>
-          </label>
-          <label className="block">
-            <span className="font-bold">{i === 0 ? "Hasta" : "Segundo horario, hasta"}</span>
-            <select name={`${pre}${i + 1}_hasta`} defaultValue={valor?.[pre]?.[i]?.[1] ?? ""} className={input}>{OPCIONES}</select>
-          </label>
+          <label className="block"><span className="font-bold">Periodo {i + 1}: desde</span>
+            <select name={`bloq${i + 1}_desde`} defaultValue={valor?.[i]?.[0] ?? ""} className={input}>{opciones}</select></label>
+          <label className="block"><span className="font-bold">Periodo {i + 1}: hasta</span>
+            <select name={`bloq${i + 1}_hasta`} defaultValue={valor?.[i]?.[1] ?? ""} className={input}>{opciones}</select></label>
         </div>
       ))}
     </fieldset>
-  );
-  return (
-    <div className="space-y-4">
-      {conDias && (
-        <fieldset className="flex flex-wrap gap-x-5 gap-y-2">
-          <legend className="mb-1 font-bold">Días en que recibes visitas</legend>
-          {[1, 2, 3, 4, 5, 6, 0].map((d) => (
-            <label key={d} className="flex items-center gap-2">
-              <input type="checkbox" name="dia" value={d} defaultChecked={valor?.dias?.includes(d)} className="size-5" /> {NOMBRES_DIA[d]}
-            </label>
-          ))}
-        </fieldset>
-      )}
-      {grupo("semana", "Lunes a viernes")}
-      {grupo("finde", "Sábados y domingos")}
-      <p className="text-base text-[#4A5E5C]">
-        Cada horario indica las horas en que puede empezar una visita, cada 30 minutos. Por ejemplo, de 4:00 PM a 6:30 PM
-        permite empezar a las 4:00, 4:30… hasta las 6:30 PM. Si un grupo de días no aplica, déjalo en blanco.
-      </p>
-    </div>
   );
 }
 
@@ -117,16 +93,13 @@ export function VolunteerForm() {
     (f) => {
       const otras = String(f.get("otras") ?? "").trim();
       if (elegidas.length === 0 && otras.length < 3) throw new Error("Elige al menos una actividad o escribe otra.");
-      const horario = horarioDeFormData(f, false);
-      const problema = validarHorario(horario);
-      if (problema) throw new Error(problema);
       return {
         email: f.get("email"), clave: f.get("clave"), contacto: f.get("contacto"),
         tutor: menor ? { nombre: f.get("tutor_nombre"), edad: Number(f.get("tutor_edad")), correo: f.get("tutor_correo") } : undefined,
         voluntario: {
           nombre_completo: f.get("nombre"), edad, ocupacion: f.get("ocupacion"), intereses: f.get("intereses"),
           experiencia_previa: f.get("experiencia") === "si", actividad_deseada: elegidas, otras_actividades: otras,
-          motivo: f.get("motivo"), descripcion: f.get("descripcion"), horario,
+          motivo: f.get("motivo"), descripcion: f.get("descripcion"),
         },
       };
     },
@@ -196,14 +169,10 @@ export function VolunteerForm() {
           <textarea name="otras" rows={2} maxLength={300} className={input} />
         </Campo>
       </fieldset>
-
-      <h2 className="pt-4 text-2xl font-bold">Tu disponibilidad</h2>
-      <p>
-        Indica en qué horarios podrías visitar. Al agendar, solo verás los horarios de cada casa de apoyo que coincidan con
-        tu disponibilidad. Llena al menos un grupo de días; el fin de semana es opcional.
+      <p className="rounded-xl bg-[#E3EEEC] p-4">
+        <span className="font-bold">{TEXTO_HORARIO}.</span> Cada casa de apoyo indica los horarios en que no recibe visitas. El día y la hora
+        exactos los eliges al solicitar la visita a cada abuelito, y al agendar asumimos que ese horario está libre para ti.
       </p>
-      <HorarioCampos />
-
       <Campo
         label={menor ? "Teléfono del adulto responsable" : "Teléfono o WhatsApp de contacto"}
         hint="Solo lo verá la organización."
@@ -276,37 +245,29 @@ function fechaLocal(sumarDias: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Calendario y hora para agendar o reagendar. Solo ofrece las horas que permite la casa de apoyo
-// (y que coinciden con la disponibilidad del voluntario, cuando se indica).
-function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, horarioCasa, horarioVol }: {
+// Calendario y hora para agendar o reagendar. Ofrece todas las horas de la casa de apoyo
+// menos los periodos en que esa casa no recibe visitas.
+function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, bloqueadas }: {
   titulo: string; cargando: boolean; error: string;
   onEnviar: (fecha: string, hora: string) => void; onVolver: () => void;
-  horarioCasa?: Horario | null; horarioVol?: Horario | null;
+  bloqueadas?: Bloqueo[] | null;
 }) {
   const [fecha, setFecha] = useState("");
   const [hora, setHora] = useState("");
   const [aviso, setAviso] = useState("");
   const manana = fechaLocal(1);
-  const horas = horasDisponibles(fecha, horarioCasa, horarioVol);
+  const horas = horasDisponibles(bloqueadas);
 
   function cambiarFecha(v: string) {
-    setHora("");
-    // El calendario del navegador no puede bloquear días al escribir, así que se valida aquí.
+    // El calendario del navegador no puede bloquear fechas pasadas al escribir, así que se valida aquí.
     if (v && v < manana) { setAviso("Elige una fecha a partir de mañana."); setFecha(""); return; }
-    if (v && horasDisponibles(v, horarioCasa, horarioVol).length === 0) {
-      setAviso(horasDisponibles(v, horarioCasa).length === 0
-        ? "Esta casa de apoyo no recibe visitas ese día. Elige otro."
-        : "Ese día no coincide con tu disponibilidad. Elige otro.");
-      setFecha(""); return;
-    }
     setAviso(""); setFecha(v);
   }
 
   return (
     <div className="space-y-4 rounded-xl border-2 border-[#9DB8B5] bg-[#F5F8F7] p-4">
       <p className="font-bold">{titulo}</p>
-      <p>Horario de la casa de apoyo: {resumenHorario(horarioCasa)}</p>
-      {horarioVol && USAR_DISPONIBILIDAD_VOLUNTARIO && <p>Tu disponibilidad: {resumenHorario(horarioVol)}</p>}
+      <p>Horario de visitas de esta casa de apoyo: {resumenHorario(bloqueadas)}.</p>
       <Campo label="Día de la visita">
         <input type="date" min={manana} value={fecha} onChange={(e) => cambiarFecha(e.target.value)} className={input} />
       </Campo>
@@ -327,9 +288,8 @@ function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, horarioCasa
   );
 }
 
-export function SolicitudButton({ residenteId, estado, visita, porOrg, horarioCasa, horarioVol }: {
-  residenteId: string; estado?: string; visita?: string; porOrg?: boolean;
-  horarioCasa?: Horario | null; horarioVol?: Horario | null;
+export function SolicitudButton({ residenteId, estado, visita, porOrg, bloqueadas }: {
+  residenteId: string; estado?: string; visita?: string; porOrg?: boolean; bloqueadas?: Bloqueo[] | null;
 }) {
   const [local, setLocal] = useState<{ estado: string; visita?: string }>();
   const [abierto, setAbierto] = useState(false);
@@ -369,7 +329,7 @@ export function SolicitudButton({ residenteId, estado, visita, porOrg, horarioCa
         titulo={actual === "cancelada" ? "Elige la nueva fecha y hora de tu visita" : "¿Cuándo quieres visitar?"}
         cargando={cargando} error={error} onEnviar={enviar}
         onVolver={() => { setAbierto(false); setError(""); }}
-        horarioCasa={horarioCasa} horarioVol={horarioVol}
+        bloqueadas={bloqueadas}
       />
     );
   }
@@ -447,7 +407,7 @@ export function EliminarOrgButton() {
 }
 
 // La casa de apoyo cambia la fecha de una visita vigente (se avisa al voluntario por correo).
-export function ReagendarOrgButton({ solicitudId, horarioCasa }: { solicitudId: string; horarioCasa?: Horario | null }) {
+export function ReagendarOrgButton({ solicitudId, bloqueadas }: { solicitudId: string; bloqueadas?: Bloqueo[] | null }) {
   const router = useRouter();
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState("");
@@ -469,7 +429,7 @@ export function ReagendarOrgButton({ solicitudId, horarioCasa }: { solicitudId: 
       titulo="Elige la nueva fecha y hora. El voluntario recibirá un correo con el cambio."
       cargando={cargando} error={error} onEnviar={enviar}
       onVolver={() => { setAbierto(false); setError(""); }}
-      horarioCasa={horarioCasa}
+      bloqueadas={bloqueadas}
     />
   );
 }

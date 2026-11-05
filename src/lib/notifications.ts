@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { db } from "./db";
-import { resumenHorario } from "./horarios";
+
 import type { Voluntario } from "./schemas";
 import { etiquetaHora, etiquetaVisita } from "./visitas";
 
@@ -150,7 +150,7 @@ export async function avisarSolicitud(c: Ctx) {
     ["Motivo de las visitas", v.motivo], ["Sobre el voluntario", v.descripcion],
     [menor ? "Teléfono del adulto responsable" : "Contacto", c.contacto], ["Correo de la cuenta", c.email],
   );
-  if (v.horario) datos.push(["Disponibilidad del voluntario", resumenHorario(v.horario)]);
+  
   await Promise.all([
     enviar(aOrg(c.org), {
       asunto: `${re ? "Cita reagendada" : "Nueva solicitud"}: ${v.nombre_completo} quiere conocer a ${c.residente.apodo}`,

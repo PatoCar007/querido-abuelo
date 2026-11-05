@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DIDACTICAS, MAYORIA_DE_EDAD, TODAS } from "./actividades";
-import { HorarioSchema } from "./horarios";
+
 // "música, lectura" -> ["música", "lectura"]
 const lista = z.preprocess(
   (v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()).filter(Boolean) : v),
@@ -30,7 +30,7 @@ export const VoluntarioSchema = z
     otras_actividades: z.string().trim().max(300, "Resume tus otras actividades en 300 caracteres").optional(),
     motivo: z.string().min(10, "Cuéntanos con un poco más de detalle por qué quieres visitar"),
     descripcion: z.string().min(10, "Escribe una breve descripción de ti"),
-    horario: HorarioSchema,
+  
   })
   .refine((v) => v.actividad_deseada !== "" || (v.otras_actividades ?? "").length >= 3, {
     message: "Elige al menos una actividad o escribe otra", path: ["actividad_deseada"],

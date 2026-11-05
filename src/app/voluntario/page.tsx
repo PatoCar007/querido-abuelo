@@ -1,33 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { cuentaActual } from "@/lib/sesion";
 import { recomendarResidentes, type Recomendacion } from "@/lib/matching";
 import { etiquetaVisita } from "@/lib/visitas";
-import { horarioDeFormData, resumenHorario, validarHorario, type Horario } from "@/lib/horarios";
-import { SolicitudButton, LogoutButton, EliminarCuentaButton, HorarioCampos, AvisoGuardado } from "@/components/forms";
+import { resumenHorario } from "@/lib/horarios";
+import { SolicitudButton, LogoutButton, EliminarCuentaButton } from "@/components/forms";
 
-// El voluntario actualiza su disponibilidad.
-async function guardarDisponibilidad(fd: FormData) {
-  "use server";
+export default async function DashboardVoluntario() {
   const cuentaId = await cuentaActual();
   if (!cuentaId) redirect("/ingresar");
-  let horario: Horario | null = null;
-  try {
-    const h = horarioDeFormData(fd, false);
-    horario = validarHorario(h) ? null : h;
-  } catch { horario = null; }
-  if (!horario) redirect("/voluntario?error=horario#disponibilidad");
-  await db.from("voluntarios").update({ horario }).eq("cuenta_id", cuentaId);
-  revalidatePath("/voluntario");
-  redirect("/voluntario?guardado=1#disponibilidad");
-}
-
-export default async function DashboardVoluntario({ searchParams }: { searchParams: Promise<{ guardado?: string; error?: string }> }) {
-  const cuentaId = await cuentaActual();
-  if (!cuentaId) redirect("/ingresar");
-  const { guardado, error: fallo } = await searchParams;
 
   const { data: v } = await db.from("voluntarios").select("*").eq("cuenta_id", cuentaId).maybeSingle();
   if (!v) redirect("/ingresar");
@@ -35,7 +17,7 @@ export default async function DashboardVoluntario({ searchParams }: { searchPara
   const [{ data: residentes }, { data: enviadas }] = await Promise.all([
     // Solo se muestran abuelitos de casas de apoyo verificadas
     db.from("residentes")
-      .select("*, organizaciones!inner(nombre, edad_minima, criterios, verificada, direccion, telefono, correo_avisos, usuario, principal, horario)")
+      .select("*, organizaciones!inner(nombre, edad_minima, criterios, verificada, direccion, telefono, correo_avisos, usuario, principal, horas_bloqueadas)")
       .eq("organizaciones.verificada", true),
     db.from("solicitudes").select("residente_id, estado, fecha_visita, hora_visita, reagendada_por_org").eq("voluntario_id", v.id),
   ]);
@@ -73,7 +55,7 @@ export default async function DashboardVoluntario({ searchParams }: { searchPara
           {casa.direccion && <p>Dirección: {casa.direccion}</p>}
           {casa.telefono && <p>Teléfono: {casa.telefono}</p>}
           {correo && <p>Correo: {correo}</p>}
-          <p>Horario de visitas: {resumenHorario(casa.horario)}</p>
+          <p>Horario de visitas: {resumenHorario(casa.horas_bloqueadas)}</p>
           {casa.criterios && <p>Requisitos de la casa: {casa.criterios}</p>}
         </div>
         <div className="mt-4">
@@ -84,7 +66,7 @@ export default async function DashboardVoluntario({ searchParams }: { searchPara
           ) : (
             <SolicitudButton
               residenteId={r.residente.id} estado={estado} visita={visitas[r.residente.id]} porOrg={porOrg[r.residente.id]}
-              horarioCasa={casa.horario ?? null} horarioVol={v.horario ?? null}
+              bloqueadas={casa.horas_bloqueadas ?? null}
             />
           )}
         </div>
@@ -125,26 +107,6 @@ export default async function DashboardVoluntario({ searchParams }: { searchPara
           <div className="grid gap-4 sm:grid-cols-2">{otros.map((r) => <Tarjeta key={r.residente.id} r={r} />)}</div>
         </section>
       )}
-
-      <section id="disponibilidad" className="border-t border-[#C9DAD7] pt-8">
-        <h2 className="mb-2 text-xl font-bold">Mi disponibilidad</h2>
-        <p className="mb-4">
-          Hoy: {v.horario ? resumenHorario(v.horario) : "sin indicar"}. Al agendar solo verás las horas de cada casa de apoyo que
-          coincidan con tu disponibilidad, y las casas la ven al revisar tu solicitud.
-        </p>
-        <form action={guardarDisponibilidad} className="max-w-xl space-y-4">
-          <HorarioCampos valor={v.horario} />
-          <div className="flex flex-wrap items-center gap-4">
-            <button className="rounded-xl bg-[#2F6F6B] px-6 py-4 font-bold text-white">Guardar disponibilidad</button>
-            {guardado && <AvisoGuardado ruta="/voluntario" />}
-          </div>
-          {fallo === "horario" && (
-            <p role="alert" className="font-bold text-red-700">
-              Revisa tu disponibilidad: cada horario necesita hora de inicio y final, y debes llenar al menos un grupo de días.
-            </p>
-          )}
-        </form>
-      </section>
 
       <section className="border-t border-[#C9DAD7] pt-8">
         <h2 className="mb-2 text-xl font-bold">Tu cuenta</h2>

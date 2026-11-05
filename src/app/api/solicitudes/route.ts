@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { cuentaActual } from "@/lib/sesion";
-import { horasDisponibles, type Horario } from "@/lib/horarios";
+import { horasDisponibles, type Bloqueo } from "@/lib/horarios";
 import { avisarCancelacion, avisarSolicitud, cargarContexto } from "@/lib/notifications";
 import { validarVisita } from "@/lib/visitas";
 
 const err = (error: string, status: number) => NextResponse.json({ error }, { status });
 
-type OrgInfo = { verificada: boolean; edad_minima: number; horario: Horario | null };
+type OrgInfo = { verificada: boolean; edad_minima: number; horas_bloqueadas: Bloqueo[] | null };
 
 // Crea una solicitud nueva, o REAGENDA una cancelada con nueva fecha y hora.
 // Queda "pendiente" hasta que la casa de apoyo dueña del abuelito la apruebe o rechace.
@@ -19,8 +19,8 @@ export async function POST(req: Request) {
   if (problema) return err(problema, 400);
 
   const [{ data: voluntario }, { data: residente }] = await Promise.all([
-    db.from("voluntarios").select("id, edad, horario").eq("cuenta_id", cuentaId).maybeSingle(),
-    db.from("residentes").select("id, organizaciones(verificada, edad_minima, horario)").eq("id", residenteId).maybeSingle(),
+    db.from("voluntarios").select("id, edad").eq("cuenta_id", cuentaId).maybeSingle(),
+    db.from("residentes").select("id, organizaciones(verificada, edad_minima, horas_bloqueadas)").eq("id", residenteId).maybeSingle(),
   ]);
   if (!voluntario) return err("Inicia sesión de nuevo.", 401);
 
@@ -32,9 +32,9 @@ export async function POST(req: Request) {
   if (voluntario.edad < org.edad_minima) {
     return err(`Esta casa de apoyo pide tener al menos ${org.edad_minima} años para visitar.`, 403);
   }
-  // Solo días y horas que permite la casa (y que coinciden con la disponibilidad del voluntario)
-  if (!horasDisponibles(fecha, org.horario, voluntario.horario).includes(hora)) {
-    return err("Esa fecha y hora no están dentro del horario de la casa de apoyo y de tu disponibilidad. Elige otra.", 400);
+  // Solo horas en que ESTA casa recibe visitas (todo el día menos los periodos que bloqueó)
+  if (!horasDisponibles(org.horas_bloqueadas).includes(hora)) {
+    return err("Esa hora no está disponible en esta casa de apoyo. Elige otra.", 400);
   }
 
   const { data: previa } = await db.from("solicitudes").select("id, estado")
