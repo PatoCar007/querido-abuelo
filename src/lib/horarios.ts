@@ -52,10 +52,32 @@ export function bloqueosDeFormData(f: FormData): Bloqueo[] {
   return salida;
 }
 
-/** Texto legible: «Todos los días de 10:00 AM a 8:00 PM, excepto de 2:00 PM a 4:00 PM». */
+/* ---------- Texto legible del horario ---------- */
+
+// Los periodos que quedan libres: el horario completo menos los bloqueos (que pueden traslaparse).
+function periodosLibres(bloqueos: Bloqueo[]): [number, number][] {
+  const inicio = aMin(HORA_INICIO), fin = aMin(HORA_FIN);
+  const ordenados = bloqueos
+    .map(([d, h]) => [aMin(d), aMin(h)] as [number, number])
+    .filter(([d, h]) => h > d)
+    .sort((a, b) => a[0] - b[0]);
+  const libres: [number, number][] = [];
+  let cursor = inicio;
+  for (const [d, h] of ordenados) {
+    if (d > cursor) libres.push([cursor, Math.min(d, fin)]);
+    cursor = Math.max(cursor, h);
+  }
+  if (cursor < fin) libres.push([cursor, fin]);
+  return libres;
+}
+
+// ["a", "b", "c"] -> "a, b y c"
+const unir = (partes: string[]) =>
+  partes.length <= 1 ? partes.join("") : `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+
+/** «Todos los días de 11:00 AM a 7:00 PM» o «…de 10:00 AM a 1:00 PM y de 3:00 PM a 8:00 PM». */
 export function resumenHorario(bloqueos?: Bloqueo[] | null): string {
-  const base = `Todos los días de ${etiquetaHora(HORA_INICIO)} a ${etiquetaHora(HORA_FIN)}`;
-  const lista = Array.isArray(bloqueos) ? bloqueos : [];
-  if (!lista.length) return base;
-  return `${base}, excepto ${lista.map(([d, h]) => `de ${etiquetaHora(d)} a ${etiquetaHora(h)}`).join(" y ")}`;
+  const libres = periodosLibres(Array.isArray(bloqueos) ? bloqueos : []);
+  if (!libres.length) return "Sin horarios disponibles";
+  return `Todos los días ${unir(libres.map(([a, b]) => `de ${etiquetaHora(aHora(a))} a ${etiquetaHora(aHora(b))}`))}`;
 }

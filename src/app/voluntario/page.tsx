@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { cuentaActual } from "@/lib/sesion";
@@ -46,10 +47,18 @@ export default async function DashboardVoluntario() {
         <p>{r.residente.edad} años</p>
         <ul className="mt-3 flex flex-wrap gap-2">
           {r.residente.intereses.map((i) => (
-            <li key={i} className={`rounded-full px-3 py-1 ${r.compartidos.includes(i) ? "bg-[#E4A93C] font-bold" : "bg-[#E3EEEC]"}`}>{i}</li>
+            <li
+              key={i}
+              className={`rounded-full px-3 py-1 ${
+                r.compartidos.includes(i) ? "bg-[#E4A93C] font-bold" : r.parecidos.includes(i) ? "bg-[#FBEFD3] font-bold" : "bg-[#E3EEEC]"
+              }`}
+            >{i}</li>
           ))}
         </ul>
-        {r.recomendado && <p className="mt-3 font-bold text-[#2F6F6B]">Comparten: {r.compartidos.join(", ")}</p>}
+        {r.compartidos.length > 0 && <p className="mt-3 font-bold text-[#2F6F6B]">Comparten: {r.compartidos.join(", ")}</p>}
+        {r.parecidos.length > 0 && (
+          <p className={`${r.compartidos.length ? "mt-1" : "mt-3"} font-bold text-[#4A5E5C]`}>Gustos parecidos: {r.parecidos.join(", ")}</p>
+        )}
         <div className="mt-3 space-y-1 text-base text-[#4A5E5C]">
           <p>Casa de apoyo: <span className="font-bold">{casa.nombre}</span></p>
           {casa.direccion && <p>Dirección: {casa.direccion}</p>}
@@ -78,7 +87,10 @@ export default async function DashboardVoluntario() {
     <main className="mx-auto max-w-4xl space-y-10 px-6 py-12">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-4xl font-bold text-[#2F6F6B]">Hola, {v.nombre_completo.split(" ")[0]}</h1>
-        <LogoutButton />
+        <div className="flex flex-wrap gap-3">
+          <Link href="/voluntario/perfil" className="rounded-xl border-2 border-[#2F6F6B] px-5 py-3 font-bold text-[#2F6F6B]">Ver mi perfil</Link>
+          <LogoutButton />
+        </div>
       </div>
 
       {v.edad < 18 && (
