@@ -1,2 +1,7 @@
 @import "tailwindcss";
 :focus-visible { outline: 3px solid #E4A93C; outline-offset: 2px; }
+
+/* Entrada suave: aparece subiendo un poco. Sin «to», termina en el estado normal del elemento. */
+@keyframes aparecer { from { opacity: 0; transform: translateY(12px); } }
+.aparece { animation: aparecer 0.6s ease-out backwards; }
+@media (prefers-reduced-motion: reduce) { .aparece { animation: none; } }

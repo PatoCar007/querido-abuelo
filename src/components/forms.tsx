@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DE_CUIDADO, DIDACTICAS } from "@/lib/actividades";
+import { Decoracion } from "@/components/Decoracion";
 import { etiquetaHora, etiquetaVisita } from "@/lib/visitas";
 import { MAX_BLOQUEOS, OPCIONES_BLOQUEO, TEXTO_HORARIO, horasDisponibles, resumenHorario, type Bloqueo } from "@/lib/horarios";
 
@@ -247,10 +248,10 @@ function fechaLocal(sumarDias: number) {
 
 // Calendario y hora para agendar o reagendar. Ofrece todas las horas de la casa de apoyo
 // menos los periodos en que esa casa no recibe visitas.
-function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, bloqueadas }: {
+function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, bloqueadas, decorar }: {
   titulo: string; cargando: boolean; error: string;
   onEnviar: (fecha: string, hora: string) => void; onVolver: () => void;
-  bloqueadas?: Bloqueo[] | null;
+  bloqueadas?: Bloqueo[] | null; decorar?: boolean;
 }) {
   const [fecha, setFecha] = useState("");
   const [hora, setHora] = useState("");
@@ -267,6 +268,7 @@ function SelectorCita({ titulo, cargando, error, onEnviar, onVolver, bloqueadas 
   return (
     <div className="space-y-4 rounded-xl border-2 border-[#9DB8B5] bg-[#F5F8F7] p-4">
       <p className="font-bold">{titulo}</p>
+            {decorar && <Decoracion ranura="cita-selector" className="h-28 w-full rounded-xl object-cover" />}
       <p>Horario de visitas de esta casa de apoyo: {resumenHorario(bloqueadas)}.</p>
       <Campo label="Día de la visita">
         <input type="date" min={manana} value={fecha} onChange={(e) => cambiarFecha(e.target.value)} className={input} />
@@ -327,6 +329,7 @@ export function SolicitudButton({ residenteId, estado, visita, porOrg, bloqueada
     return (
       <SelectorCita
         titulo={actual === "cancelada" ? "Elige la nueva fecha y hora de tu visita" : "¿Cuándo quieres visitar?"}
+                decorar
         cargando={cargando} error={error} onEnviar={enviar}
         onVolver={() => { setAbierto(false); setError(""); }}
         bloqueadas={bloqueadas}
@@ -343,6 +346,8 @@ export function SolicitudButton({ residenteId, estado, visita, porOrg, bloqueada
           </p>
         )}
         <p role="status" className={`rounded-xl px-4 py-3 font-bold ${mensaje.clase}`}>{mensaje.texto}</p>
+                {actual === "pendiente" && <Decoracion ranura="cita-enviada" className="mx-auto w-full max-w-[14rem]" />}
+        {actual === "aprobada" && <Decoracion ranura="cita-aprobada" className="mx-auto w-full max-w-[14rem]" />}
         {cita && actual !== "cancelada" && <p className="font-bold">Visita: {cita}</p>}
         {(actual === "pendiente" || actual === "aprobada") && (
           <button disabled={cargando} className="rounded-xl border-2 border-red-700 px-5 py-3 font-bold text-red-700 disabled:opacity-50"

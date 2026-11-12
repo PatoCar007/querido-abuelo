@@ -7,6 +7,7 @@ import { recomendarResidentes, type Recomendacion } from "@/lib/matching";
 import { etiquetaVisita } from "@/lib/visitas";
 import { resumenHorario } from "@/lib/horarios";
 import { SolicitudButton, LogoutButton, EliminarCuentaButton } from "@/components/forms";
+import { Decoracion } from "@/components/Decoracion";
 
 export default async function DashboardVoluntario() {
   const cuentaId = await cuentaActual();
@@ -42,7 +43,7 @@ export default async function DashboardVoluntario() {
     // Correo de contacto de la casa: el que configuró, o el de su cuenta (la cuenta original usa ORG_EMAIL)
     const correo = casa.correo_avisos ?? (casa.principal ? process.env.ORG_EMAIL : casa.usuario) ?? null;
     return (
-      <article className="rounded-2xl border border-[#C9DAD7] bg-white p-6">
+     <article className="rounded-2xl border border-[#C9DAD7] bg-white p-6 transition hover:border-[#9DB8B5] motion-safe:hover:-translate-y-0.5">
         <h3 className="text-2xl font-bold">{r.residente.apodo}</h3>
         <p>{r.residente.edad} años</p>
         <ul className="mt-3 flex flex-wrap gap-2">
@@ -92,7 +93,7 @@ export default async function DashboardVoluntario() {
           <LogoutButton />
         </div>
       </div>
-
+      <Decoracion ranura="panel-cabecera" className="h-32 w-full rounded-2xl object-cover sm:h-44" />
       {v.edad < 18 && (
         <p role="note" className="rounded-xl border-2 border-[#E4A93C] bg-[#FBEFD3] p-4 font-bold">
           Recuerda: por ser menor de edad, debes ir siempre acompañado/a de una persona adulta que dé su consentimiento.
@@ -109,7 +110,12 @@ export default async function DashboardVoluntario() {
 
       <section>
         <h2 className="mb-4 text-2xl font-bold">Podrían interesarte</h2>
-        {afines.length === 0 && <p>Por ahora no hay coincidencias nuevas. Revisa la lista de abajo.</p>}
+        {afines.length === 0 && (
+          <div>
+            <p>Por ahora no hay coincidencias nuevas. Revisa la lista de abajo.</p>
+            <Decoracion ranura="panel-vacio" className="mx-auto mt-4 w-full max-w-xs" />
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">{afines.map((r) => <Tarjeta key={r.residente.id} r={r} />)}</div>
       </section>
 
